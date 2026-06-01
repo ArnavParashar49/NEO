@@ -1,0 +1,28 @@
+{
+    "gemini_api_key": "AQ.Ab8RN6KDK9quzQNscv8svGp0MdDkKC0mmQMtDW7_Bm6h1Wh49Q",
+    "os_system": "mac",
+    "camera_index": 0,
+    "camera_width": 1280,
+    "camera_height": 720,
+    "camera_fps": 30,
+    "camera_preview_fps": 24,
+    "yolo_live_preview": false,
+    "yolo_preview_interval_sec": 0.65,
+    "vision_preload": true,
+    "yolo_infer_size": 480,
+    "smart_mode": true,
+    "noise_gate": true,
+    "noise_gate_strength": "normal",
+    "local_vision": true,
+    "local_vision_offline": false,
+    "yolo_enabled": true,
+    "yolo_model": "yolov8n.pt",
+    "yolo_confidence": 0.42,
+    "face_recognition_enabled": true,
+    "live_voice": "Aoede",
+    "siri_bar": {
+        "corner": "top-right",
+        "margin_x": 1,
+        "margin_y": 0
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "gemini_api_key": "YOUR_GEMINI_KEY_FROM_aistudio.google.com",
+    "os_system": "mac",
+    "search_provider": "ddg_first",
+    "prefer_gemini_lite": true,
+    "camera_index": 0,
+    "smart_mode": true,
+    "hybrid_fast_path": true,
+    "noise_gate": true,
+    "noise_gate_strength": "normal",
+    "local_vision": true,
+    "local_vision_offline": false,
+    "yolo_enabled": true,
+    "yolo_model": "yolov8n.pt",
+    "yolo_confidence": 0.42,
+    "face_recognition_enabled": true,
+    "siri_bar": {
+        "corner": "top-right",
+        "margin_x": 14,
+        "margin_y": 36
+    }
+}
