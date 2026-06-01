@@ -1,0 +1,31 @@
+sounddevice
+google-genai
+google-generativeai
+pillow
+requests
+beautifulsoup4
+duckduckgo-search
+ddgs
+playwright
+pyautogui
+pyperclip
+pygetwindow==0.0.8
+opencv-python==4.8.0.76
+numpy<2
+mss
+psutil
+comtypes
+pycaw
+send2trash
+youtube-transcript-api
+pywinauto
+python-pptx
+pyqt6==6.6.1  # macOS 12: newer PyQt6/Qt needs macOS 13+
+PyQt6-Qt6==6.6.3  # must match pyqt6 — do not let pip upgrade this separately
+PyQt6-WebEngine==6.6.0  # embedded YouTube in HUD grid (match pyqt6-qt6 6.6.x)
+PyQt6-WebEngine-Qt6==6.6.3
+certifi
+vosk
+pypdf
+ultralytics>=8.0.0
+deepface>=0.0.92
