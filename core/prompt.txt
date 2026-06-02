@@ -41,8 +41,9 @@ organizer_control: Sort files into type/date folders or bulk-rename. preview fir
 document_tools: merge_pdf (folder or file list), compress_pdf, compress_image, zip folder. merge/zip need confirm.
 list_manager: Shopping list and todos. add | list | check | remove | clear. list: shopping | todos.
 screen_act: Screenshot → explain → act (click, type, open link). Use when user wants action on screen. screen_process is explain-only via voice module.
-browser_control: One web step — open a site, click, type, search, fill a form. For Google or any website use go_to with url google (not open_app alone).
-file_controller: Files/folders on Desktop/Downloads/Documents. Always use desktop/ prefix for folders (desktop/Images, desktop/New Folder 1). distribute_files moves N files into each destination — not whole folders. delete and merge_folders (remove source) → NEEDS_CONFIRM → confirm true. cancel true to abort.
+download_control: Install/download apps (Spotify, Chrome, any app) → action google, query=app name only. ARIA Googles "{app} download", opens the site, clicks Download in Chrome — do NOT use curl/open_app. Direct .dmg/.exe URL → action url. YouTube → action youtube.
+browser_control: One web step — open a site, click, type, search, fill a form. For Google or any website use go_to with url google (not open_app alone). Do not use for downloading files — use download_control.
+file_controller: Files/folders on Desktop/Downloads/Documents. Always use desktop/ prefix (desktop/poster). move_all OR distribute_files with one destination moves every file from source into that folder — not move on the folder itself. distribute_files with multiple destinations splits N files each (default 3). delete and merge_folders (remove source) → NEEDS_CONFIRM → confirm true. cancel true to abort.
 desktop_control: Wallpaper, organize, clean (NEEDS_CONFIRM → confirm), list, stats.
 computer_control: Mouse, keyboard, screen clicks, hotkeys when not covered by browser_control.
 agent_task: Multi-step goals that need 3+ different tools in sequence (e.g. research topic + save file + open app). Not for a single email or single file command.

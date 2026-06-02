@@ -18,6 +18,7 @@ comtypes
 pycaw
 send2trash
 youtube-transcript-api
+# Optional for download_control (YouTube/music/video): pip install yt-dlp
 pywinauto
 python-pptx
 pyqt6==6.6.1  # macOS 12: newer PyQt6/Qt needs macOS 13+

@@ -21,6 +21,7 @@ ABSOLUTE RULES:
 - NEVER use generated_code or write Python scripts. It does not exist.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
+- Use download_control when the user wants a file saved (download, get installer, save PDF/video).
 - Use file_controller to save content to disk.
 - Max 8 steps. Use the minimum steps needed.
 
@@ -34,6 +35,12 @@ web_search
   mode: "search" or "compare" (optional, default: search)
   items: list of strings (optional, for compare mode)
   aspect: string (optional, for compare mode)
+
+download_control
+  action: "google" (apps) | "auto" | "url" | "youtube" | "cli" (default: auto for apps use google)
+  query: string — app name e.g. Spotify (google action searches and clicks Download in browser)
+  url: string — direct https file link only
+  destination: string (optional, default: downloads)
 
 game_updater
   action: "update" | "install" | "list" | "download_status" | "schedule" (required)

@@ -5,11 +5,14 @@ import asyncio
 import concurrent.futures
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote_plus
 
 from playwright.async_api import (
     async_playwright,
@@ -62,6 +65,34 @@ def _normalize_url(url: str) -> str:
 
 # Simple navigation in the user's real browser (avoids Playwright about:blank tabs).
 _USE_NATIVE_NAV = True
+
+# Direct official download pages (skip bad Google results).
+_OFFICIAL_APP_URLS: dict[str, str] = {
+    "spotify": "https://www.spotify.com/download/",
+    "google chrome": "https://www.google.com/chrome/",
+    "chrome": "https://www.google.com/chrome/",
+    "firefox": "https://www.mozilla.org/firefox/download/",
+    "vlc": "https://www.videolan.org/vlc/",
+    "discord": "https://discord.com/download",
+    "zoom": "https://zoom.us/download",
+    "slack": "https://slack.com/downloads/mac",
+    "vscode": "https://code.visualstudio.com/download",
+    "visual studio code": "https://code.visualstudio.com/download",
+    "telegram": "https://desktop.telegram.org/",
+    "whatsapp": "https://www.whatsapp.com/download",
+    "obs": "https://obsproject.com/download",
+    "steam": "https://store.steampowered.com/about/",
+    "epic games": "https://store.epicgames.com/download",
+    "notion": "https://www.notion.com/desktop",
+    "cursor": "https://cursor.com/download",
+}
+
+_BAD_RESULT_DOMAINS = (
+    "google.com", "gstatic.com", "webcache", "accounts.google",
+    "support.google", "policies.google", "youtube.com", "reddit.com",
+    "wikipedia.org", "quora.com", "stackoverflow.com", "softonic.",
+    "filehorse.", "majorgeeks.", "download.cnet.", "pinterest.",
+)
 
 
 def _native_navigate(url: str, browser: str | None = None) -> str:
@@ -500,13 +531,19 @@ class _BrowserSession:
             print(f"[Browser] ✅ Safari launched")
             return
 
-        profile = _real_profile_dir(self.browser_name)
+        real_profile = _real_profile_dir(self.browser_name)
+        aria_profile = str(Path.home() / ".aria_profiles" / self.browser_name)
+        Path(aria_profile).mkdir(parents=True, exist_ok=True)
+        downloads_path = str(Path.home() / "Downloads")
 
         kwargs = {
             "headless":    False,
             "slow_mo":     0,
             "viewport":    None,
             "no_viewport": True,
+            "accept_downloads": True,
+            "downloads_path": downloads_path,
+            "ignore_default_args": ["--no-sandbox", "--disable-dev-shm-usage"],
             "args": [
                 "--start-maximized",
                 "--disable-blink-features=AutomationControlled",
@@ -527,28 +564,21 @@ class _BrowserSession:
             + (f" @ {exe}" if exe else "")
         )
 
-        try:
-            self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
-            await asyncio.sleep(0.5)
-            self._page = await self._pick_startup_page()
-            self._bring_browser_front()
-            print(f"[Browser] ✅ Launched [{label}] profile={profile}")
-            return
-        except Exception as e:
-            print(f"[Browser] ⚠️  Real profile failed for {label}: {e}")
+        # ARIA profile first — user's Chrome is often already open (profile lock).
+        for profile, tag in ((aria_profile, "ARIA"), (real_profile, "real")):
+            if profile == aria_profile and profile == real_profile:
+                continue
+            try:
+                self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
+                await asyncio.sleep(0.5)
+                self._page = await self._pick_startup_page()
+                self._bring_browser_front()
+                print(f"[Browser] ✅ Launched [{label}] {tag} profile → Downloads: {downloads_path}")
+                return
+            except Exception as e:
+                print(f"[Browser] ⚠️  {tag} profile failed for {label}: {e}")
 
-        aria_profile = str(Path.home() / ".aria_profiles" / self.browser_name)
-        Path(aria_profile).mkdir(parents=True, exist_ok=True)
-        print(f"[Browser] Retrying with ARIA profile: {aria_profile}")
-
-        try:
-            self._context = await engine_obj.launch_persistent_context(aria_profile, **kwargs)
-            await asyncio.sleep(0.5)
-            self._page = await self._pick_startup_page()
-            self._bring_browser_front()
-            print(f"[Browser] ✅ Launched [{label}] with ARIA profile")
-        except Exception as e2:
-            raise RuntimeError(f"Could not launch {self.browser_name}: {e2}") from e2
+        raise RuntimeError(f"Could not launch {self.browser_name} for automation.")
 
     async def _pick_startup_page(self) -> Page:
         """Reuse Playwright's initial tab instead of opening a second about:blank tab."""
@@ -813,6 +843,280 @@ class _BrowserSession:
             return f"Page reloaded: {page.url}"
         except Exception as e:
             return f"Reload error: {e}"
+
+    async def playwright_goto(self, url: str) -> str:
+        """Navigate with Playwright (automation), not native open."""
+        url = _normalize_url(url)
+        if not url:
+            return "NEEDS_USER: Which URL should I open?"
+        page = await self._get_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            await asyncio.sleep(0.6)
+        except PlaywrightTimeout:
+            pass
+        except Exception as e:
+            return f"Navigation error: {e}"
+        self._bring_browser_front()
+        return page.url or url
+
+    async def _dismiss_cookie_banners(self, page: Page) -> None:
+        for label in (
+            "Accept all", "Accept All", "I agree", "Agree", "OK", "Got it",
+            "Allow all", "Accept", "Yes, I agree",
+        ):
+            try:
+                btn = page.get_by_role("button", name=label)
+                if await btn.count() > 0:
+                    await btn.first.click(timeout=2_500)
+                    await asyncio.sleep(0.4)
+                    return
+            except Exception:
+                pass
+
+    def _official_url_for_app(self, app: str) -> str | None:
+        key = app.lower().strip()
+        if key in _OFFICIAL_APP_URLS:
+            return _OFFICIAL_APP_URLS[key]
+        compact = key.replace(" ", "")
+        for name, url in _OFFICIAL_APP_URLS.items():
+            if compact == name.replace(" ", "") or compact in name.replace(" ", ""):
+                return url
+        return None
+
+    def _score_google_result(self, href: str, title: str, app: str) -> int:
+        h = href.lower()
+        t = (title or "").lower()
+        app_l = app.lower().strip()
+        app_compact = app_l.replace(" ", "").replace("-", "")
+
+        if any(b in h for b in _BAD_RESULT_DOMAINS):
+            return -100
+
+        score = 0
+        if app_compact and app_compact in h.replace("-", "").replace(".", ""):
+            score += 70
+        if f"{app_compact}.com" in h or f"www.{app_compact}.com" in h:
+            score += 120
+        if "/download" in h:
+            score += 40
+        if "official" in t or "download" in t:
+            score += 20
+        if app_l in t:
+            score += 25
+        return score
+
+    async def _find_official_url_on_google(self, page: Page, app: str) -> str:
+        await asyncio.sleep(0.8)
+        candidates: list[tuple[int, str]] = []
+
+        for sel in ('#search a[href^="http"]', 'div#rso a[href^="http"]'):
+            loc = page.locator(sel)
+            try:
+                n = await loc.count()
+            except Exception:
+                continue
+            for i in range(min(n, 20)):
+                a = loc.nth(i)
+                try:
+                    href = (await a.get_attribute("href") or "").strip()
+                    title = (await a.inner_text() or "").strip()
+                except Exception:
+                    continue
+                if not href.startswith("http"):
+                    continue
+                sc = self._score_google_result(href, title, app)
+                if sc > 0:
+                    candidates.append((sc, href))
+
+        if not candidates:
+            return ""
+
+        candidates.sort(key=lambda x: -x[0])
+        best = candidates[0][1]
+        print(f"[Browser] Official pick: {best} (score={candidates[0][0]})")
+        return best
+
+    async def _save_download(self, download) -> str:
+        name = (download.suggested_filename or "download.bin").strip()
+        safe = re.sub(r'[<>:"/\\|?*]', "_", name)[:200]
+        dest = Path.home() / "Downloads" / safe
+        if dest.exists():
+            stem, suf = dest.stem, dest.suffix
+            dest = Path.home() / "Downloads" / f"{stem}_{int(time.time())}{suf}"
+        await download.save_as(dest)
+        size_mb = dest.stat().st_size / (1024 * 1024)
+        return f"Saved to {dest} ({size_mb:.1f} MB)"
+
+    async def _try_download_click(self, page: Page, app_name: str) -> str | None:
+        """Click a download control and wait for the browser download event."""
+        app = (app_name or "").strip()
+
+        async def _click_locator(loc) -> None:
+            el = loc.first
+            await el.scroll_into_view_if_needed(timeout=5_000)
+            await el.click(timeout=12_000, force=True)
+
+        click_attempts = []
+
+        for ext in (".dmg", ".pkg", ".exe", ".msi", ".zip"):
+            loc = page.locator(f'a[href*="{ext}" i]')
+            click_attempts.append((f"link {ext}", loc))
+
+        labels = [
+            "Download", "Download now", "Free download", "Get the app",
+            "Download for Mac", "Download for macOS", "Mac download",
+            "Download for Windows", "Get download",
+        ]
+        if app:
+            labels = [f"Download {app}", f"Get {app}"] + labels
+
+        for label in labels:
+            for role in ("link", "button"):
+                loc = page.get_by_role(role, name=label)
+                click_attempts.append((label, loc))
+
+        for desc, loc in click_attempts:
+            try:
+                if await loc.count() == 0:
+                    continue
+            except Exception:
+                continue
+            try:
+                async with page.expect_download(timeout=90_000) as dl_info:
+                    await _click_locator(loc)
+                download = await dl_info.value
+                self._bring_browser_front()
+                return await self._save_download(download)
+            except Exception:
+                continue
+        return None
+
+    async def _click_download_on_page(self, page: Page, app_name: str) -> str:
+        await self._dismiss_cookie_banners(page)
+        saved = await self._try_download_click(page, app_name)
+        if saved:
+            return saved
+
+        app = (app_name or "").strip()
+        for ext in (".dmg", ".pkg", ".exe", ".msi", ".deb", ".zip", ".app"):
+            try:
+                loc = page.locator(f'a[href*="{ext}" i]')
+                if await loc.count() > 0:
+                    await loc.first.click(timeout=10_000)
+                    await asyncio.sleep(1.0)
+                    self._bring_browser_front()
+                    return f"Started download ({ext}) from {page.url}"
+            except Exception:
+                pass
+
+        labels = [
+            "Download", "Download now", "Free download", "Get the app",
+            "Get app", "Install", "Download for Mac", "Download for macOS",
+            "Download for Windows", "Get download", "Download free",
+        ]
+        if app:
+            labels = [f"Download {app}", f"Get {app}", app] + labels
+
+        seen: set[str] = set()
+        for label in labels:
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            for role in ("link", "button"):
+                try:
+                    loc = page.get_by_role(role, name=label)
+                    if await loc.count() == 0:
+                        continue
+                    await loc.first.click(timeout=8_000)
+                    await asyncio.sleep(1.0)
+                    self._bring_browser_front()
+                    return f"Clicked '{label}' on {page.url}"
+                except Exception:
+                    pass
+
+        try:
+            loc = page.get_by_text(re.compile(r"download", re.I))
+            if await loc.count() > 0:
+                await loc.first.click(timeout=6_000)
+                await asyncio.sleep(0.8)
+                self._bring_browser_front()
+                return f"Clicked Download on {page.url}"
+        except Exception:
+            pass
+
+        self._bring_browser_front()
+        return (
+            f"Opened {page.url} — no Download button found automatically. "
+            "Click Download on the page; the file should appear in your Downloads folder."
+        )
+
+    async def app_download_from_google(self, app_name: str) -> str:
+        """
+        Google → search 'download {app}' → official site → Download → ~/Downloads.
+        """
+        app = re.sub(
+            r"\b(download|install|get|from\s+google|the\s+app|app|please)\b",
+            "",
+            (app_name or ""),
+            flags=re.I,
+        ).strip()
+        if not app:
+            return "FAILED: Which app should I download?"
+
+        search_q = f"download {app}"
+        page = await self._get_page()
+        site_url = self._official_url_for_app(app)
+
+        if not site_url:
+            search_url = "https://www.google.com/search?q=" + quote_plus(search_q)
+            print(f"[Browser] 1) Google search: {search_q}")
+            try:
+                await page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
+                await asyncio.sleep(1.2)
+            except PlaywrightTimeout:
+                pass
+            except Exception as e:
+                return f"FAILED: Could not open Google — {e}"
+
+            await self._dismiss_cookie_banners(page)
+            self._bring_browser_front()
+            picked = await self._find_official_url_on_google(page, app)
+            if picked:
+                site_url = picked
+                try:
+                    await page.goto(site_url, wait_until="domcontentloaded", timeout=35_000)
+                    await asyncio.sleep(1.2)
+                except PlaywrightTimeout:
+                    pass
+
+        if not site_url:
+            return (
+                f"FAILED: No official download page found for '{app}'. "
+                f"Searched Google for '{search_q}'."
+            )
+
+        if site_url and page.url != site_url:
+            print(f"[Browser] 2) Official site: {site_url}")
+            try:
+                await page.goto(site_url, wait_until="domcontentloaded", timeout=35_000)
+                await asyncio.sleep(1.2)
+            except PlaywrightTimeout:
+                pass
+            except Exception as e:
+                return f"FAILED: Could not open {site_url} — {e}"
+        else:
+            print(f"[Browser] 2) On site: {page.url}")
+
+        await self._dismiss_cookie_banners(page)
+        self._bring_browser_front()
+
+        print(f"[Browser] 3) Click Download on {page.url}")
+        click_msg = await self._click_download_on_page(page, app)
+        return (
+            f"Google → '{search_q}' → {site_url} → {click_msg}"
+        )
 
     async def close_browser(self) -> str:
         await self._async_close()

@@ -485,12 +485,112 @@ def _parse_destinations(params: dict) -> list[str]:
     return out
 
 
+def _list_moveable_files(src: Path, *, skip_under: Path | None = None) -> list[Path]:
+    """Top-level files in src; optionally skip anything inside skip_under."""
+    skip_res = skip_under.resolve() if skip_under else None
+    out: list[Path] = []
+    for item in src.iterdir():
+        if not item.is_file() or item.name.startswith("."):
+            continue
+        if skip_res:
+            try:
+                if item.resolve() == skip_res:
+                    continue
+            except OSError:
+                pass
+        out.append(item)
+    return sorted(out, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def move_all_files(
+    source: str,
+    destination: str,
+    *,
+    include_folders: bool = False,
+) -> str:
+    """Move every top-level item from source into one destination folder."""
+    try:
+        src = _resolve_path(source)
+        if not src.exists() or not src.is_dir():
+            return f"FAILED: Source folder not found: {source}"
+        if not _is_safe_path(src):
+            return f"Access denied: {src}"
+
+        dst = _resolve_path(destination)
+        if not _is_safe_path(dst):
+            return f"Access denied: {dst}"
+        dst.mkdir(parents=True, exist_ok=True)
+        if not dst.is_dir():
+            return f"FAILED: Destination is not a folder: {destination}"
+
+        try:
+            if dst.resolve() == src.resolve():
+                return "FAILED: Source and destination are the same folder."
+            if dst.resolve().is_relative_to(src.resolve()):
+                pass  # dest subfolder of src — allowed
+            elif src.resolve().is_relative_to(dst.resolve()):
+                return "FAILED: Cannot move a folder into its own subfolder."
+        except (OSError, ValueError):
+            pass
+
+        skip_under = dst if dst.resolve().is_relative_to(src.resolve()) else None
+        moved: list[str] = []
+        skipped: list[str] = []
+
+        for item in sorted(src.iterdir(), key=lambda p: p.name.lower()):
+            if item.name.startswith("."):
+                continue
+            if skip_under:
+                try:
+                    if item.resolve() == skip_under.resolve():
+                        continue
+                except OSError:
+                    pass
+            if item.is_dir():
+                if not include_folders:
+                    continue
+            elif not item.is_file():
+                continue
+
+            target = dst / item.name
+            if target.exists():
+                if item.is_dir():
+                    skipped.append(f"{item.name}/ (folder already exists)")
+                    continue
+                target = _unique_dest(dst, item.name)
+            try:
+                shutil.move(str(item), str(target))
+                moved.append(f"{item.name} → {dst.name}/")
+            except Exception as e:
+                skipped.append(f"{item.name} ({e})")
+
+        if not moved and not skipped:
+            return f"No files to move in {src.name}/ (folders are skipped unless include_folders is true)."
+
+        summary = f"Moved {len(moved)} item(s) from {src.name}/ to {dst.name}/."
+        if skipped:
+            summary += f" Skipped {len(skipped)}: " + "; ".join(skipped[:5])
+            if len(skipped) > 5:
+                summary += f" (+{len(skipped) - 5} more)"
+        left_files = _list_moveable_files(src, skip_under=skip_under)
+        if left_files:
+            summary += f" {len(left_files)} file(s) still in {src.name}/."
+        if len(moved) <= 10:
+            summary += "\n" + "\n".join(moved)
+        else:
+            summary += "\n" + "\n".join(moved[:10]) + f"\n... and {len(moved) - 10} more."
+        return summary
+
+    except Exception as e:
+        return f"FAILED: Could not move all files — {e}"
+
+
 def distribute_files(
     source: str,
     destinations: list[str],
     count: int = 3,
 ) -> str:
-    """Move `count` files from source folder into each destination (files only, not the folder)."""
+    """Move files from source into destination folder(s). One destination + count 0 = move all."""
     try:
         src = _resolve_path(source)
         if not src.exists() or not src.is_dir():
@@ -511,24 +611,37 @@ def distribute_files(
         if not dest_paths:
             return "FAILED: No destination folder(s) specified."
 
-        count = max(1, min(int(count or 3), 20))
-        files = sorted(
-            [f for f in src.iterdir() if f.is_file() and not f.name.startswith(".")],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        skip_under = None
+        if len(dest_paths) == 1:
+            try:
+                if dest_paths[0].resolve().is_relative_to(src.resolve()):
+                    skip_under = dest_paths[0]
+            except (OSError, ValueError):
+                pass
 
-        total_needed = count * len(dest_paths)
+        files = _list_moveable_files(src, skip_under=skip_under)
+        if not files:
+            return f"No files to move in {src.name}/."
+
+        raw_count = int(count) if count is not None else 3
+        if len(dest_paths) == 1 and raw_count <= 0:
+            return move_all_files(source, str(destinations[0]))
+
+        per_dest = max(1, min(raw_count if raw_count > 0 else 3, 20))
+        if len(dest_paths) == 1:
+            per_dest = min(per_dest, len(files))
+
+        total_needed = per_dest * len(dest_paths)
         if len(files) < total_needed:
             return (
                 f"FAILED: Only {len(files)} file(s) in {src.name}, "
-                f"need {total_needed} ({count} per folder × {len(dest_paths)} folders)."
+                f"need {total_needed} ({per_dest} per folder × {len(dest_paths)} folders)."
             )
 
         moved: list[str] = []
         idx = 0
         for dest in dest_paths:
-            for _ in range(count):
+            for _ in range(per_dest):
                 f = files[idx]
                 idx += 1
                 target = dest / f.name
@@ -537,7 +650,7 @@ def distribute_files(
                 shutil.move(str(f), str(target))
                 moved.append(f"{f.name} → {dest.name}/")
 
-        left = [f for f in src.iterdir() if f.is_file() and not f.name.startswith(".")]
+        left = _list_moveable_files(src, skip_under=skip_under)
         summary = f"Moved {len(moved)} file(s) from {src.name}/."
         if left:
             summary += f" {len(left)} file(s) remain in {src.name}/."
@@ -1073,10 +1186,26 @@ def file_controller(
             return _handle_merge_with_confirm(params)
 
         elif action == "distribute_files":
+            dests = _parse_destinations(params)
+            raw_count = params.get("count")
+            if len(dests) == 1 and raw_count is None:
+                count = 0
+            else:
+                count = int(raw_count if raw_count is not None else 3)
             return distribute_files(
                 source=params.get("source") or path,
-                destinations=_parse_destinations(params),
-                count=int(params.get("count", 3)),
+                destinations=dests,
+                count=count,
+            )
+
+        elif action == "move_all":
+            dest = (params.get("destination") or "").strip()
+            if not dest:
+                return "FAILED: destination required for move_all."
+            return move_all_files(
+                source=params.get("source") or path,
+                destination=dest,
+                include_folders=bool(params.get("include_folders", False)),
             )
 
         elif action == "move":

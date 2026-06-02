@@ -39,6 +39,28 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "download_control",
+        "description": (
+            "Download apps and files. For ANY app (Spotify, Chrome, VLC): use action google "
+            "with query=app name — searches Google for '{app} download', opens the site, "
+            "clicks Download in the browser (Playwright). auto does the same for app names. "
+            "url: direct file link only. youtube: yt-dlp. Never use open_app instead of this "
+            "when user asks to download/install an application."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":      {"type": "STRING", "description": "google (apps) | auto | url | youtube | cli (default auto)"},
+                "query":       {"type": "STRING", "description": "What to download (name, song, app) or search terms"},
+                "url":         {"type": "STRING", "description": "Direct https:// download link"},
+                "destination": {"type": "STRING", "description": "Folder shortcut: downloads (default), desktop, etc."},
+                "tool":        {"type": "STRING", "description": "cli action: curl | wget | yt-dlp"},
+                "args":        {"type": "ARRAY", "items": {"type": "STRING"}, "description": "cli action: arguments after tool name"},
+            },
+            "required": []
+        }
+    },
+    {
         "name": "weather_report",
         "description": (
             "Speaks the weather forecast aloud for a city. "
@@ -367,19 +389,22 @@ TOOL_DECLARATIONS = [
         "name": "file_controller",
         "description": (
             "Manages files and folders. Paths support shortcuts + subfolders: desktop/Images, "
-            "desktop/2026-05. merge_folders moves all contents safely. "
+            "desktop/poster. move_all moves every file from source into one folder (use for "
+            "'move all desktop files to X'). distribute_files splits N files per destination; "
+            "with one destination and no count, moves all files. merge_folders moves all contents safely. "
             "delete and merge_folders (remove source) need confirm true after user says yes. "
             "open recent screenshot: action open + recent true."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":        {"type": "STRING", "description": "list | merge_folders | distribute_files | move | copy | delete | open | find | ..."},
+                "action":        {"type": "STRING", "description": "list | move_all | distribute_files | merge_folders | move | copy | delete | open | find | ..."},
                 "path":          {"type": "STRING", "description": "Path or shortcut (desktop, downloads). Use desktop/FolderName for subfolders."},
                 "source":        {"type": "STRING", "description": "Source folder (merge_folders, distribute_files, move)"},
                 "destination":   {"type": "STRING", "description": "Destination folder"},
                 "destination2":  {"type": "STRING", "description": "Second destination for distribute_files"},
-                "count":         {"type": "INTEGER", "description": "Files per destination for distribute_files (default 3)"},
+                "count":         {"type": "INTEGER", "description": "distribute_files: per-destination file count (one dest, omit = all). largest: max results."},
+                "include_folders": {"type": "BOOLEAN", "description": "move_all: also move subfolders (default false, files only)"},
                 "remove_source": {"type": "BOOLEAN", "description": "merge_folders: remove source only when empty after merge"},
                 "recent":        {"type": "BOOLEAN", "description": "open: open most recent screenshot"},
                 "new_name":      {"type": "STRING", "description": "New name for rename"},
@@ -387,7 +412,6 @@ TOOL_DECLARATIONS = [
                 "name":          {"type": "STRING", "description": "File or folder name"},
                 "app":           {"type": "STRING", "description": "App to open file with (open action)"},
                 "extension":     {"type": "STRING", "description": "File extension to search (e.g. .pdf)"},
-                "count":         {"type": "INTEGER", "description": "Number of results for largest"},
                 "confirm":       {"type": "BOOLEAN", "description": "true ONLY after user confirms delete/merge"},
                 "cancel":        {"type": "BOOLEAN", "description": "true if user declined"},
             },

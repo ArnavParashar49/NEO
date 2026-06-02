@@ -15,7 +15,7 @@ from hybrid.types import ExecutionContext
 
 # Mirrors main._SLOW_TOOLS — used for UI progress only
 _SLOW_TOOLS = frozenset({
-    "web_search", "youtube_video", "agent_task", "file_processor",
+    "web_search", "download_control", "youtube_video", "agent_task", "file_processor",
     "flight_finder", "screen_process", "dev_agent", "project_builder",
     "send_email", "browser_control", "file_controller", "calendar_control",
     "notes_control", "organizer_control", "document_tools", "list_manager",
@@ -43,6 +43,7 @@ _TOOL_META: dict[str, dict[str, Any]] = {
     "browser_control": {"agent": "system", "category": "browser", "fast": False},
     "game_updater": {"agent": "system", "category": "games", "fast": False},
     "web_search": {"agent": "research", "category": "research", "fast": False},
+    "download_control": {"agent": "system", "category": "files", "fast": False},
     "youtube_video": {"agent": "research", "category": "research", "fast": False},
     "flight_finder": {"agent": "research", "category": "research", "fast": False},
     "screen_process": {"agent": "research", "category": "vision", "fast": False},
@@ -106,6 +107,7 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.send_message import send_message
     from actions.system_control import system_control
     from actions.weather_report import weather_action
+    from actions.download_control import download_control
     from actions.web_search import web_search as web_search_action
     from actions.youtube_video import youtube_video
 
@@ -134,6 +136,7 @@ def _build_handlers() -> dict[str, Callable]:
         "project_builder": _wrap_action(project_builder),
         "agent_task": _agent_task_handler,
         "web_search": _wrap_action(web_search_action),
+        "download_control": _wrap_action(download_control),
         "file_processor": _file_processor_handler,
         "computer_control": _wrap_action(computer_control),
         "game_updater": _wrap_action(game_updater, speak=True),

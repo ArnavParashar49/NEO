@@ -54,6 +54,148 @@ def _run_osascript(script: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def navigate_active_tab(url: str, browser: str | None = None) -> str:
+    """Open URL in the current tab (no extra about:blank / new-tab flash)."""
+    url = (url or "").strip()
+    if not url:
+        return "NEEDS_USER: Which URL should I open?"
+
+    if _OS == "Darwin":
+        safe = _esc_url(url)
+        script = (
+            'tell application "Google Chrome"\n'
+            "  activate\n"
+            "  if (count of windows) = 0 then\n"
+            "    make new window\n"
+            "  end if\n"
+            f'  set URL of active tab of front window to "{safe}"\n'
+            "end tell\n"
+        )
+        ok, err = _run_osascript(script)
+        if ok:
+            time.sleep(0.3)
+            return f"Opened: {url}"
+        print(f"[BrowserNative] active tab navigate failed: {err}")
+
+    return navigate_user_browser(url, browser)
+
+
+_GOOGLE_FIRST_RESULT_JS = (
+    "(function(){"
+    "var links=[].slice.call(document.querySelectorAll("
+    "'#search a[href^=\"http\"], div#rso a[href^=\"http\"]'));"
+    "var skip=['google.com','gstatic.com','webcache','youtube.com/results'];"
+    "for(var i=0;i<links.length;i++){"
+    "var h=links[i].href||'';"
+    "if(!h||skip.some(function(s){return h.indexOf(s)>=0;})) continue;"
+    "links[i].click(); return 'opened:'+h;}"
+    "return 'none';})();"
+)
+
+_DOWNLOAD_CLICK_JS = (
+    "(function(){"
+    "function go(el){if(!el)return false;"
+    "try{el.scrollIntoView({block:'center',inline:'center'});"
+    "el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));"
+    "if(typeof el.click==='function')el.click();return true;}catch(e){return false;}}"
+    "var sels=['a[href*=\".dmg\"]','a[href*=\".pkg\"]','a[href*=\".exe\"]','a[href*=\".msi\"]',"
+    "'a[download]','a[href*=\"download\"]','button[data-testid*=\"download\"]'];"
+    "for(var i=0;i<sels.length;i++){var el=document.querySelector(sels[i]);"
+    "if(go(el))return 'clicked:'+sels[i];}"
+    "var nodes=[].slice.call(document.querySelectorAll('a,button,[role=button]'));"
+    "for(var j=0;j<nodes.length;j++){"
+    "var t=(nodes[j].textContent||nodes[j].getAttribute('aria-label')||'').trim();"
+    "if(/^download\\b/i.test(t)||/\\bdownload\\s+(for\\s+)?(mac|macos|windows)/i.test(t)){"
+    "if(go(nodes[j]))return 'clicked:text:'+t.slice(0,48);}}"
+    "return 'none';})();"
+)
+
+
+def click_download_on_active_tab(browser: str | None = None) -> str:
+    """Click Download on the current Chrome tab (macOS)."""
+    return _chrome_run_js(_DOWNLOAD_CLICK_JS, browser)
+
+
+def open_google_first_result(search_query: str, browser: str | None = None) -> str:
+    """Google search in the active tab, then click the first real result."""
+    from urllib.parse import quote_plus
+
+    q = (search_query or "").strip()
+    if not q:
+        return "none"
+    url = "https://www.google.com/search?q=" + quote_plus(q)
+    navigate_active_tab(url, browser)
+    activate_app("Google Chrome")
+    time.sleep(2.8)
+    return _chrome_run_js(_GOOGLE_FIRST_RESULT_JS, browser)
+
+
+def native_app_download_from_google(app_name: str, browser: str | None = None) -> str:
+    """
+    User's Chrome: Google → 'download {app}' → official link → Download click.
+    """
+    import re
+    from urllib.parse import quote_plus
+
+    app = re.sub(
+        r"\b(download|install|get|from\s+google|the\s+app|app|please)\b",
+        "",
+        (app_name or ""),
+        flags=re.I,
+    ).strip()
+    if not app:
+        return "FAILED: Which app should I download?"
+
+    try:
+        from actions.browser_control import _OFFICIAL_APP_URLS
+    except ImportError:
+        _OFFICIAL_APP_URLS = {}
+
+    official = _OFFICIAL_APP_URLS.get(app.lower())
+    if not official:
+        for name, url in _OFFICIAL_APP_URLS.items():
+            if app.lower().replace(" ", "") == name.replace(" ", ""):
+                official = url
+                break
+
+    search_q = f"download {app}"
+    google_url = "https://www.google.com/search?q=" + quote_plus(search_q)
+    print(f"[Download] Native Chrome: Google '{search_q}'")
+
+    if _OS == "Darwin":
+        navigate_active_tab(google_url, browser)
+        activate_app("Google Chrome")
+        time.sleep(2.8)
+        pick = _chrome_run_js(_GOOGLE_FIRST_RESULT_JS, browser)
+        print(f"[Download] Google result: {pick}")
+        if pick == "none" or pick.startswith("error"):
+            if official:
+                navigate_active_tab(official, browser)
+                time.sleep(2.5)
+            else:
+                return (
+                    f"Opened Google search for '{search_q}'. "
+                    "Click the official site link, then Download."
+                )
+        else:
+            time.sleep(2.5)
+
+        click = click_download_on_active_tab(browser)
+        print(f"[Download] Click result: {click}")
+        page = get_front_browser_url(browser) or official or ""
+        if click.startswith("clicked"):
+            return (
+                f"Searched for '{search_q}', opened the site, and clicked Download. "
+                f"Check your Downloads folder. ({click})"
+            )
+        return (
+            f"Opened {page or 'the download page'} but could not auto-click Download ({click}). "
+            "Please click the Download button once — file goes to Downloads."
+        )
+
+    return f"FAILED: Native download flow is macOS-only for now. Open: {official or search_q}"
+
+
 def navigate_user_browser(url: str, browser: str | None = None) -> str:
     """Open a URL in the user's browser — avoids Playwright about:blank tabs."""
     url = (url or "").strip()
