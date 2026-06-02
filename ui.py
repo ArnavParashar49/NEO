@@ -1069,8 +1069,8 @@ class AriaUI:
 
     def siri_wake(self):
         if self._siri:
+            self._siri.req_cancel_hide.emit()
             if self._siri.is_expanded():
-                self._siri.req_cancel_hide.emit()
                 return
             self._siri.req_show_compact.emit()
 
@@ -1137,9 +1137,6 @@ class AriaUI:
             self._siri.req_apply_state.emit(state)
             if state in ("SPEAKING", "THINKING"):
                 self._siri.req_cancel_hide.emit()
-            elif state == "LISTENING":
-                self._siri.req_cancel_hide.emit()
-                self.siri_schedule_hide(7000)
             elif state == "STANDBY" and not self._siri.is_expanded():
                 self.siri_hide_now()
 

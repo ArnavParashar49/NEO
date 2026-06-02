@@ -45,6 +45,7 @@ _DEFAULT_MARGIN_Y = 36
 _DEFAULT_CORNER = "top-right"
 _SLIDE_MS = 300
 _SLIDE_IN_MS = 480
+_SLIDE_IN_MS_FAST = 140
 _SLIDE_IN_PX = 88
 _EXPAND_MS = 380
 _CAMERA_EXPAND_MS = 240
@@ -968,13 +969,14 @@ class SiriBarWindow(QWidget):
     def is_overlay_visible(self) -> bool:
         return self.isVisible() and self._visible_target
 
-    def show_compact(self):
+    def show_compact(self, *, fast: bool = True):
         """Slide in the orb overlay (never tears down an open panel)."""
         self._hide_timer.stop()
         if self._expanded:
             self.cancel_scheduled_hide()
             return
         self._force_compact = True
+        self._slide_in_fast = fast
         self.slide_in()
 
     def set_prompt_text(self, text: str):
@@ -1012,7 +1014,8 @@ class SiriBarWindow(QWidget):
         app = QApplication.instance()
         if app:
             app.processEvents()
-        anim = self._run_geometry_anim(start, end, _SLIDE_IN_MS)
+        slide_ms = _SLIDE_IN_MS_FAST if getattr(self, "_slide_in_fast", False) else _SLIDE_IN_MS
+        anim = self._run_geometry_anim(start, end, slide_ms)
         anim.finished.connect(lambda: setattr(self, "_docked", True))
 
     def _on_hide_timer(self) -> None:
