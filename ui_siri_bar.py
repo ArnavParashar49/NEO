@@ -50,7 +50,7 @@ _EXPAND_MS = 380
 _CAMERA_EXPAND_MS = 240
 _CAMERA_SLIDE_IN_MS = 220
 _COLLAPSE_MS = 380
-_HIDE_AFTER_STANDBY_MS = 5000
+_HIDE_AFTER_STANDBY_MS = 7000
 _EXPANDED_W = 440
 _EXPANDED_H = 400
 _EXPANDED_RADIUS = 24
@@ -1049,7 +1049,7 @@ class SiriBarWindow(QWidget):
 
         anim.finished.connect(_hide)
 
-    def schedule_hide(self, delay_ms: int = 5000):
+    def schedule_hide(self, delay_ms: int = _HIDE_AFTER_STANDBY_MS):
         if (
             self._expanded
             or self._speaking_active

@@ -1074,6 +1074,19 @@ class AriaUI:
                 return
             self._siri.req_show_compact.emit()
 
+    def siri_schedule_hide(self, delay_ms: int = 7000) -> None:
+        """Slide orb away after idle (default 7s)."""
+        if self._siri and not self._siri.is_expanded():
+            self._siri.req_schedule_hide.emit(max(0, int(delay_ms)))
+
+    def siri_hide_now(self) -> None:
+        if self._siri:
+            self._siri.req_schedule_hide.emit(0)
+
+    def siri_cancel_hide(self) -> None:
+        if self._siri:
+            self._siri.req_cancel_hide.emit()
+
     def siri_set_prompt(self, text: str):
         if self._siri:
             self._siri.req_set_prompt.emit(text)
@@ -1122,11 +1135,13 @@ class AriaUI:
         self._win._state_sig.emit(state)
         if self._siri:
             self._siri.req_apply_state.emit(state)
-            if state in ("LISTENING", "SPEAKING", "THINKING"):
+            if state in ("SPEAKING", "THINKING"):
                 self._siri.req_cancel_hide.emit()
+            elif state == "LISTENING":
+                self._siri.req_cancel_hide.emit()
+                self.siri_schedule_hide(7000)
             elif state == "STANDBY" and not self._siri.is_expanded():
-                self._siri.req_cancel_hide.emit()
-                # Orb stays hidden until wake word / clap (see siri_wake)
+                self.siri_hide_now()
 
     def stream_aria(self, body: str):
         """Update the live ARIA line while she is speaking."""
@@ -1194,8 +1209,12 @@ class AriaUI:
             self._siri.req_progress_stop.emit()
 
     def push_audio_levels(self, bands: list[float]):
-        if self._siri:
+        if not self._siri:
+            return
+        try:
             self._siri.req_audio.emit(bands)
+        except RuntimeError:
+            self._siri = None
 
     def show_visuals(self, summary: str, query: str, on_done=None):
         """Compact UI: skip image grid; finish callback immediately."""

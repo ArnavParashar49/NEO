@@ -66,6 +66,7 @@ CHUNK_SIZE          = 1024
 VIS_BANDS           = 64
 FOLLOWUP_SECONDS    = 10
 LISTEN_TIMEOUT_SEC  = 10
+SIRI_IDLE_HIDE_SEC  = 7
 WAKE_TTS_MODEL      = "gemini-2.5-flash-preview-tts"
 # Prebuilt Gemini voices: Kore, Aoede (typically female), Charon, Puck, Fenrir, etc.
 _DEFAULT_LIVE_VOICE = "Kore"
@@ -368,6 +369,9 @@ def _tool_filler_phrase(name: str, args: dict) -> str:
         if (args.get("angle") or "").lower() == "camera":
             return "Opening your camera — let me see what's there."
         return "Peeking at your screen — no judgment."
+    if name == "download_control":
+        q = (args.get("query") or args.get("name") or "that").strip()
+        return f"Downloading {q} — opening Google and the official site."
     labels = {
         "browser_control": "Browser time — one moment.",
         "send_email": "Email duty — on it.",
@@ -586,6 +590,13 @@ class AriaLive:
             self.ui.set_standby(False)
             self.ui.set_state("THINKING")
 
+    def _schedule_siri_idle_hide(self, seconds: float | None = None) -> None:
+        """Hide compact orb after silence with no reply."""
+        if self.ui.siri_blocks_wake():
+            return
+        delay_ms = int((seconds if seconds is not None else SIRI_IDLE_HIDE_SEC) * 1000)
+        self.ui.siri_schedule_hide(delay_ms)
+
     def _go_standby(self):
         """Return to wake-word standby and hide the open mic."""
         self._user_spoke_this_turn = False
@@ -597,6 +608,7 @@ class AriaLive:
         self._followup_deadline = 0.0
         self._wake_listen_blocked_until = time.time() + 0.4
         self._set_phase(MicPhase.STANDBY)
+        self.ui.siri_hide_now()
         print("[ARIA] Standby — say 'Aria' or clap twice.")
 
     def _reset_live_session_state(self) -> None:
@@ -731,6 +743,7 @@ class AriaLive:
             self._voice_activity_frames = 0
             self.ui.siri_wake()
             self._set_phase(MicPhase.USER_SPEAKING)
+            self._schedule_siri_idle_hide()
             self._flush_wake_prebuffer()
             return
 
@@ -747,6 +760,7 @@ class AriaLive:
         self.ui.set_standby(False)
         self.ui.siri_set_prompt("I'm listening…")
         self.ui.set_state("LISTENING")
+        self._schedule_siri_idle_hide()
         self._flush_wake_prebuffer()
 
     def _force_listen(self):
@@ -793,16 +807,10 @@ class AriaLive:
         self._processing_keepalive_stop.clear()
 
         def loop():
-            n = 0
-            while not self._processing_keepalive_stop.wait(12.0):
+            while not self._processing_keepalive_stop.wait(25.0):
                 if not self._processing:
                     break
-                n += 1
-                msg = self._processing_status_msg or "Still working…"
-                if n > 1:
-                    msg = f"Still working — {msg.split(',')[0].lower()}"
-                print(f"[ARIA] keepalive: {msg}")
-                self.ui.write_activity(msg)
+                # UI only — no repeated log lines or spoken duplicates
 
         threading.Thread(target=loop, daemon=True, name="ARIA-keepalive").start()
 
@@ -832,6 +840,7 @@ class AriaLive:
 
     def _enter_processing(self, eta_sec: int = 15, label: str = ""):
         """Mute mic and show progress while ARIA works."""
+        self.ui.siri_cancel_hide()
         self._processing = True
         now = time.time()
         self._wake_block_until = max(self._wake_block_until, now + 180.0)
@@ -1004,6 +1013,9 @@ class AriaLive:
         self._stop_processing_keepalive()
         self._processing_status_msg = ""
         self.ui.stop_log_progress()
+        phase = self._get_phase()
+        if phase in (MicPhase.FOLLOWUP, MicPhase.USER_SPEAKING) and not self.ui.siri_blocks_wake():
+            self._schedule_siri_idle_hide()
 
     def _speak_quick_ack(self, user_text: str = ""):
         if self._ack_spoken_this_turn:
@@ -1036,6 +1048,9 @@ class AriaLive:
                 self._followup_deadline = now + FOLLOWUP_SECONDS
             self._followup_voice_engaged = True
             self._user_spoke_this_turn = True
+            self.ui.siri_cancel_hide()
+            if phase in (MicPhase.USER_SPEAKING, MicPhase.FOLLOWUP):
+                self._schedule_siri_idle_hide()
 
     def _mark_aria_reply_started(self) -> None:
         """Pause silence timeout while ARIA is speaking."""
@@ -1080,6 +1095,7 @@ class AriaLive:
         self._user_line_logged = False
         self._set_phase(MicPhase.FOLLOWUP)
         self.ui.siri_wake()
+        self._schedule_siri_idle_hide()
 
     def _on_stopped_speaking(self):
         if not self._smart_mode:
@@ -1378,7 +1394,7 @@ class AriaLive:
         if show_progress and not self._processing:
             label = _tool_status_line(name, args)
             self._announce_tool_start(name, args)
-            # No offline filler TTS here — it blocks the live socket recv loop (ping timeout).
+            self._speak_tool_filler(name, args)
             self._enter_processing(self._tool_progress_eta(name), label=label)
         elif show_progress and self._processing:
             self._announce_tool_start(name, args)

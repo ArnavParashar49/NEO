@@ -95,6 +95,22 @@ _FAST_RULES: list[tuple[re.Pattern, str, callable]] = [
         "open_app",
         lambda m: {"app_name": "Calculator"},
     ),
+    (
+        re.compile(
+            r"^(?:please\s+)?(?:download|get)\s+(?:me\s+)?(?:the\s+)?(.+?)(?:\s+from\s+(?:google|the\s+(?:web|internet)))?[\.\!?]*$",
+            re.I,
+        ),
+        "download_control",
+        lambda m: {"action": "google", "query": m.group(1).strip()},
+    ),
+    (
+        re.compile(
+            r"^(?:please\s+)?download\s+(https?://\S+)[\.\!?]*$",
+            re.I,
+        ),
+        "download_control",
+        lambda m: {"action": "url", "url": m.group(1).strip().rstrip(".,)")},
+    ),
 ]
 
 
