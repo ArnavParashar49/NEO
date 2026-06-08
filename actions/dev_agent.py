@@ -19,15 +19,7 @@ MAX_FIX_ATTEMPTS = 5
 MODEL_PLANNER    = "gemini-2.5-flash"
 MODEL_WRITER     = "gemini-2.5-flash"
 
-def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
-
-
-def _get_model(model_name: str):
-    import google.generativeai as genai
-    genai.configure(api_key=_get_api_key())
-    return genai.GenerativeModel(model_name)
+from core.llm import ask
 
 
 def _strip_fences(text: str) -> str:
@@ -117,8 +109,6 @@ def _plan_project(
     architecture: str = "",
     project_kind: str = "",
 ) -> dict:
-    model = _get_model(MODEL_PLANNER)
-
     plan = plan or {}
     components = plan.get("components") or []
     component_hint = ""
@@ -180,12 +170,13 @@ Rules — YOU decide based on the idea, not fixed templates:
 
 JSON:"""
 
+    response = ""
     try:
-        response = model.generate_content(prompt)
-        raw = _strip_fences(response.text)
+        response = ask(prompt, model=MODEL_PLANNER)
+        raw = _strip_fences(response)
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Planner returned invalid JSON: {e}\nRaw: {response.text[:300]}")
+        raise ValueError(f"Planner returned invalid JSON: {e}\nRaw: {response[:300]}")
     except Exception as e:
         if _is_rate_limit(e):
             raise RateLimitError(str(e))
@@ -200,8 +191,6 @@ def _write_file(
     already_written: dict[str, str],
     user_brief: str = "",
 ) -> str:
-    model = _get_model(MODEL_WRITER)
-
     file_path = file_info["path"]
     file_desc = file_info.get("description", "")
     file_imports = file_info.get("imports", [])
@@ -271,8 +260,8 @@ General rules:
 Code for {file_path}:"""
 
     try:
-        response = model.generate_content(prompt)
-        code = _strip_fences(response.text)
+        response = ask(prompt, model=MODEL_WRITER)
+        code = _strip_fences(response)
 
         full_path = project_dir / file_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -405,8 +394,6 @@ def _fix_files(
     entry_point: str,
 ) -> dict[str, str]:
 
-    model = _get_model(MODEL_PLANNER)
-
     error_file, error_line = _parse_traceback(error_output, list(file_codes.keys()))
     error_type = _classify_error(error_output)
 
@@ -467,8 +454,8 @@ Rules:
 Fixed code for {fix_path}:"""
 
         try:
-            response = model.generate_content(prompt)
-            fixed = _strip_fences(response.text)
+            response = ask(prompt, model=MODEL_PLANNER)
+            fixed = _strip_fences(response)
 
             full_path = project_dir / fix_path
             full_path.parent.mkdir(parents=True, exist_ok=True)

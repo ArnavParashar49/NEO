@@ -292,7 +292,7 @@ def create_folder(path: str, name: str = "") -> str:
 def _handle_delete_with_confirm(params: dict, path: str, name: str) -> str:
     from actions import confirm_gate as cg
 
-    proceed, stored, err = cg.consume_confirmed(params)
+    proceed, stored, err = cg.consume_confirmed(params, "file_delete")
     if err:
         return err
     if proceed:
@@ -327,7 +327,7 @@ def _handle_merge_with_confirm(params: dict) -> str:
     if not destination:
         return "NEEDS_USER: Which folder should I merge into? Set destination."
 
-    proceed, stored, err = cg.consume_confirmed(params)
+    proceed, stored, err = cg.consume_confirmed(params, "merge_folders")
     if err:
         return err
     if proceed:

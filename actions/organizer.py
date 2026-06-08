@@ -237,7 +237,7 @@ def _handle_with_confirm(
 ) -> str:
     from actions import confirm_gate as cg
 
-    proceed, stored, err = cg.consume_confirmed(params)
+    proceed, stored, err = cg.consume_confirmed(params, action_id)
     if err:
         return err
     if proceed:

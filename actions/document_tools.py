@@ -252,7 +252,7 @@ def _zip_compress(params: dict) -> str:
 def _handle_with_confirm(action_id: str, summary: str, ask: str, params: dict, run_fn) -> str:
     from actions import confirm_gate as cg
 
-    proceed, stored, err = cg.consume_confirmed(params)
+    proceed, stored, err = cg.consume_confirmed(params, action_id)
     if err:
         return err
     if proceed:
