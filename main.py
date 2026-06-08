@@ -1,6 +1,7 @@
 import asyncio
 import random
 import re
+import socket
 import threading
 import json
 import sys
@@ -44,7 +45,6 @@ from actions.dev_agent         import dev_agent
 from actions.project_builder   import project_builder
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
-from actions.game_updater      import game_updater
 from wake_listener             import WakeListener
 from audio_processing          import NoiseGate
 
@@ -389,6 +389,75 @@ def _tool_status_line(name: str, args: dict) -> str:
 def _get_api_key() -> str:
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)["gemini_api_key"]
+
+
+_GEMINI_API_HOST = "generativelanguage.googleapis.com"
+
+
+def _api_key_config_error() -> str | None:
+    """Return a user-facing message when the Gemini key is missing or a placeholder."""
+    try:
+        key = (_get_api_key() or "").strip()
+    except (FileNotFoundError, KeyError, json.JSONDecodeError, TypeError):
+        return "Missing config/api_keys.json with gemini_api_key."
+    if not key:
+        return "gemini_api_key is empty in config/api_keys.json."
+    lowered = key.lower()
+    if lowered in {"your-api-key", "your_api_key", "paste-key-here"} or "your" in lowered and "key" in lowered:
+        return "Replace the placeholder gemini_api_key in config/api_keys.json."
+    return None
+
+
+def _gemini_host_reachable() -> bool:
+    try:
+        socket.getaddrinfo(_GEMINI_API_HOST, 443, type=socket.SOCK_STREAM)
+        return True
+    except OSError:
+        return False
+
+
+def _classify_connect_error(exc: BaseException) -> str:
+    """network | auth | transient | cancelled | unknown"""
+    s = f"{type(exc).__name__} {exc}".lower()
+    if isinstance(exc, socket.gaierror) or "nodename nor servname" in s or "name or service not known" in s:
+        return "network"
+    if any(
+        tok in s
+        for tok in (
+            "invalid authentication",
+            "authentication credentials",
+            "api key not valid",
+            "api_key_invalid",
+            "permission denied",
+            "unauthorized",
+            "forbidden",
+            "billing",
+            "quota",
+        )
+    ):
+        return "auth"
+    if "1008" in s and "policy violation" in s:
+        return "auth"
+    if "cancelled" in s or "portaudio" in s:
+        return "cancelled"
+    if any(tok in s for tok in ("1006", "keepalive", "connectionclosed", "connection reset", "closed")):
+        return "transient"
+    return "unknown"
+
+
+def _connect_error_message(kind: str, exc: BaseException | None = None) -> str:
+    if kind == "network":
+        return "No internet — can't reach Gemini. Check Wi‑Fi or DNS, then ARIA will retry."
+    if kind == "auth":
+        return (
+            "Gemini rejected the API key. Open config/api_keys.json, paste a valid "
+            "gemini_api_key from Google AI Studio, and ensure the Gemini API is enabled."
+        )
+    if kind == "transient":
+        return "Live session dropped — reconnecting…"
+    if exc is not None:
+        return f"Connection error: {exc}"
+    return "Connection error — retrying…"
 
 
 def _hybrid_fast_path_enabled() -> bool:
@@ -1764,13 +1833,43 @@ class AriaLive:
             ):
                 self._go_standby()
 
+    def _report_connect_issue(self, kind: str, message: str, *, repeat: int) -> None:
+        """Log + show status without spamming identical errors every 3 seconds."""
+        if repeat == 0:
+            print(f"[ARIA] ⚠️ {message}")
+            self._show_status_text(message)
+        elif repeat % 6 == 0:
+            print(f"[ARIA] ⚠️ Still waiting ({kind})…")
+
     async def run(self):
+        key_err = _api_key_config_error()
+        if key_err:
+            print(f"[ARIA] ❌ {key_err}")
+            self._show_status_text(key_err)
+            return
+
         client = genai.Client(
             api_key=_get_api_key(),
-            http_options={"api_version": "v1beta"}
+            http_options={"api_version": "v1beta"},
         )
 
+        backoff = 3.0
+        last_kind: str | None = None
+        repeat = 0
+
         while True:
+            if not _gemini_host_reachable():
+                msg = _connect_error_message("network")
+                if last_kind != "network":
+                    repeat = 0
+                self._report_connect_issue("network", msg, repeat=repeat)
+                last_kind = "network"
+                repeat += 1
+                self.ui.set_state("THINKING")
+                await asyncio.sleep(min(backoff, 20.0))
+                backoff = min(backoff * 1.4, 60.0)
+                continue
+
             try:
                 print("[ARIA] 🔌 Connecting...")
                 self.ui.set_state("THINKING")
@@ -1786,6 +1885,10 @@ class AriaLive:
                     self.out_queue      = asyncio.Queue(maxsize=10)
                     self._turn_done_event = asyncio.Event()
                     self._tool_send_lock = asyncio.Lock()
+
+                    backoff = 3.0
+                    last_kind = None
+                    repeat = 0
 
                     print(f"[ARIA] ✅ Connected. Voice={_live_voice_name()}")
                     if self._smart_mode:
@@ -1810,27 +1913,58 @@ class AriaLive:
                     if isinstance(e, BaseExceptionGroup)
                     else [e]
                 )
+                kinds: list[str] = []
                 for sub in subs:
-                    s = str(sub).lower()
-                    if "cancelled" in s or "portaudio" in s:
+                    kind = _classify_connect_error(sub)
+                    if kind == "cancelled":
                         continue
-                    if any(
-                        tok in s
-                        for tok in ("1006", "1008", "keepalive", "closed", "taskgroup")
-                    ):
+                    kinds.append(kind)
+                    if kind == "transient" and repeat == 0:
                         print(f"[ARIA] Session ended ({type(sub).__name__})")
-                    else:
+                    elif kind == "unknown" and repeat == 0:
                         print(f"[ARIA] ⚠️ {sub}")
                         traceback.print_exception(type(sub), sub, sub.__traceback__)
+
+                if not kinds:
+                    continue
+
+                if "auth" in kinds:
+                    kind = "auth"
+                elif "network" in kinds:
+                    kind = "network"
+                elif "transient" in kinds:
+                    kind = "transient"
+                else:
+                    kind = kinds[0]
+
+                if kind != last_kind:
+                    repeat = 0
+                msg = _connect_error_message(kind, subs[0] if subs else None)
+                if kind in ("auth", "network"):
+                    self._report_connect_issue(kind, msg, repeat=repeat)
+                elif kind == "transient" and repeat == 0:
+                    self._show_status_text(msg)
+
+                last_kind = kind
+                repeat += 1
+                if kind == "auth":
+                    backoff = max(backoff, 30.0)
+                elif kind == "network":
+                    backoff = min(max(backoff, 5.0) * 1.4, 60.0)
+                else:
+                    backoff = min(backoff * 1.35, 30.0)
             finally:
                 self._reset_live_session_state()
                 self.set_speaking(False, block_wake_after=False)
                 self.session = None
                 self._tool_send_lock = None
                 sd.stop()
+
             self.ui.set_state("THINKING")
-            print("[ARIA] 🔄 Reconnecting in 3s...")
-            await asyncio.sleep(3)
+            wait = int(backoff)
+            if repeat <= 1 or repeat % 6 == 0:
+                print(f"[ARIA] 🔄 Reconnecting in {wait}s…")
+            await asyncio.sleep(backoff)
 
 def main():
     ui = AriaUI("face.png")
