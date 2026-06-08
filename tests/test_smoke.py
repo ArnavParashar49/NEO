@@ -99,6 +99,104 @@ def test_as_bool():
 
 
 # --------------------------------------------------------------------------- #
+# 3. Autonomous agent loop — control flow, verified with a fake session.       #
+# --------------------------------------------------------------------------- #
+
+def _fresh_registry():
+    from hybrid.registry import ToolRegistry
+    reg = ToolRegistry()
+
+    def echo(args, ctx):
+        return f"echoed: {args.get('text', '')}"
+
+    def danger(args, ctx):
+        return "NEEDS_CONFIRM: really delete everything?"
+
+    reg.register(name="echo", description="echo", parameters={}, handler=echo)
+    reg.register(name="danger", description="danger", parameters={}, handler=danger)
+    return reg
+
+
+class _ScriptedSession:
+    """Returns a pre-baked list of Turns, then a final text."""
+    def __init__(self, turns, finalize_text="fake summary"):
+        self._turns = list(turns)
+        self._finalize_text = finalize_text
+        self.results = []
+
+    def step(self):
+        from core.agent_loop import Turn
+        return self._turns.pop(0) if self._turns else Turn(text="(out of script)")
+
+    def add_tool_result(self, name, result):
+        self.results.append((name, result))
+
+    def finalize(self):
+        return self._finalize_text
+
+
+class _CountingSession:
+    """Never finishes; emits a unique tool call each step (for budget tests)."""
+    def __init__(self):
+        self.n = 0
+
+    def step(self):
+        from core.agent_loop import Turn
+        self.n += 1
+        return Turn(calls=[("echo", {"i": self.n})])
+
+    def add_tool_result(self, name, result):
+        pass
+
+    def finalize(self):
+        return "summary after limit"
+
+
+def test_agent_loop_runs_tool_then_answers():
+    from core.agent_loop import Turn, run_agent
+    reg = _fresh_registry()
+    session = _ScriptedSession([
+        Turn(calls=[("echo", {"text": "hi"})]),
+        Turn(text="All done."),
+    ])
+    res = run_agent("say hi", registry=reg, session=session)
+    assert res.stopped_reason == "done"
+    assert res.answer == "All done."
+    assert len(res.steps) == 1 and res.steps[0].tool == "echo"
+    assert session.results == [("echo", "echoed: hi")]  # real result fed back
+
+
+def test_agent_loop_stops_on_needs_confirm():
+    from core.agent_loop import Turn, run_agent
+    reg = _fresh_registry()
+    session = _ScriptedSession([
+        Turn(calls=[("danger", {})]),
+        Turn(text="should never get here"),
+    ])
+    res = run_agent("delete stuff", registry=reg, session=session)
+    assert res.stopped_reason == "needs_user"
+    assert res.answer.startswith("NEEDS_CONFIRM")
+
+
+def test_agent_loop_guards_against_thrash():
+    from core.agent_loop import Turn, run_agent
+    reg = _fresh_registry()
+    same = Turn(calls=[("echo", {"text": "x"})])
+    session = _ScriptedSession([same, same, same, same, same])
+    res = run_agent("loop", registry=reg, session=session)
+    assert res.stopped_reason == "loop_guard"
+
+
+def test_agent_loop_respects_step_budget():
+    from core.agent_loop import run_agent
+    reg = _fresh_registry()
+    res = run_agent("forever", registry=reg, session=_CountingSession(), max_steps=3)
+    assert res.stopped_reason == "max_steps"
+    assert len(res.steps) == 3
+    assert res.answer == "summary after limit"
+
+
+# --------------------------------------------------------------------------- #
 # Runner                                                                       #
 # --------------------------------------------------------------------------- #
 

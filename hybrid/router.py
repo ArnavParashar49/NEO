@@ -22,34 +22,11 @@ _AGENT_TASK_RE = re.compile(
     re.I,
 )
 
-# Fast-path utterance → tool (regex only, sub-second)
+# Tiny fast-path: ONLY latency-critical, unambiguous system controls keep their
+# sub-second regex shortcut. Everything else (open apps, downloads, bluetooth,
+# media, etc.) now defers to the model so it can reason about intent rather than
+# matching a fixed phrase. Keep this list short on purpose.
 _FAST_RULES: list[tuple[re.Pattern, str, callable]] = [
-    (
-        re.compile(
-            r"^(?:hey\s+aria[,]?\s+)?(?:please\s+)?(?:open|launch|start|run)\s+(.+?)[\.\!?]*$",
-            re.I,
-        ),
-        "open_app",
-        lambda m: {"app_name": m.group(1).strip()},
-    ),
-    (
-        re.compile(
-            r"^(?:please\s+)?(?:play|pause|resume|skip)\s+(?:music|spotify)?[\.\!?]*$",
-            re.I,
-        ),
-        "open_app",
-        lambda m: {"app_name": "Spotify"},
-    ),
-    (
-        re.compile(r"(?:turn on|enable)\s+bluetooth[\.\!?]*$", re.I),
-        "system_control",
-        lambda m: {"action": "bluetooth", "state": "on"},
-    ),
-    (
-        re.compile(r"(?:turn off|disable)\s+bluetooth[\.\!?]*$", re.I),
-        "system_control",
-        lambda m: {"action": "bluetooth", "state": "off"},
-    ),
     (
         re.compile(
             r"(?:increase|turn up|raise)\s+(?:the\s+)?volume|volume up|louder",
@@ -86,30 +63,6 @@ _FAST_RULES: list[tuple[re.Pattern, str, callable]] = [
         ),
         "system_control",
         lambda m: {"action": "brightness", "direction": "down"},
-    ),
-    (
-        re.compile(
-            r"^(?:open|launch)\s+(?:the\s+)?calculator[\.\!?]*$",
-            re.I,
-        ),
-        "open_app",
-        lambda m: {"app_name": "Calculator"},
-    ),
-    (
-        re.compile(
-            r"^(?:please\s+)?(?:download|get)\s+(?:me\s+)?(?:the\s+)?(.+?)(?:\s+from\s+(?:google|the\s+(?:web|internet)))?[\.\!?]*$",
-            re.I,
-        ),
-        "download_control",
-        lambda m: {"action": "google", "query": m.group(1).strip()},
-    ),
-    (
-        re.compile(
-            r"^(?:please\s+)?download\s+(https?://\S+)[\.\!?]*$",
-            re.I,
-        ),
-        "download_control",
-        lambda m: {"action": "url", "url": m.group(1).strip().rstrip(".,)")},
     ),
 ]
 

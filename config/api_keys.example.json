@@ -6,6 +6,7 @@
     "camera_index": 0,
     "smart_mode": true,
     "hybrid_fast_path": true,
+    "autonomous_mode": true,
     "noise_gate": true,
     "noise_gate_strength": "normal",
     "local_vision": true,
