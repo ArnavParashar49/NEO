@@ -42,13 +42,6 @@ download_control
   url: string — direct https file link only
   destination: string (optional, default: downloads)
 
-game_updater
-  action: "update" | "install" | "list" | "download_status" | "schedule" (required)
-  platform: "steam" | "epic" | "both" (optional, default: both)
-  game_name: string (optional)
-  app_id: string (optional)
-  shutdown_when_done: boolean (optional)
-
 send_email
   to: string — recipient email (compose step)
   subject: string
@@ -238,16 +231,6 @@ Steps:
 
 file_controller | action: list, path: desktop
 file_controller | action: largest, path: desktop, count: 5
-
-Goal: "Install PUBG from Steam"
-Steps:
-
-game_updater | action: install, platform: steam, game_name: "PUBG"
-
-Goal: "Update all my Steam games"
-Steps:
-
-game_updater | action: update, platform: steam
 
 Goal: "Send John a message on WhatsApp saying there is a meeting tomorrow"
 Steps:

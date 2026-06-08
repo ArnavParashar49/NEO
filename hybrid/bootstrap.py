@@ -41,7 +41,6 @@ _TOOL_META: dict[str, dict[str, Any]] = {
     "dev_agent": {"agent": "system", "category": "dev", "fast": True},
     "project_builder": {"agent": "system", "category": "dev", "fast": True},
     "browser_control": {"agent": "system", "category": "browser", "fast": False},
-    "game_updater": {"agent": "system", "category": "games", "fast": False},
     "web_search": {"agent": "research", "category": "research", "fast": False},
     "download_control": {"agent": "system", "category": "files", "fast": False},
     "youtube_video": {"agent": "research", "category": "research", "fast": False},
@@ -94,7 +93,6 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.file_controller import file_controller
     from actions.file_processor import file_processor
     from actions.flight_finder import flight_finder
-    from actions.game_updater import game_updater
     from actions.list_manager import list_manager
     from actions.notes import notes_control
     from actions.open_app import open_app
@@ -139,7 +137,6 @@ def _build_handlers() -> dict[str, Callable]:
         "download_control": _wrap_action(download_control),
         "file_processor": _file_processor_handler,
         "computer_control": _wrap_action(computer_control),
-        "game_updater": _wrap_action(game_updater, speak=True),
         "flight_finder": _wrap_action(flight_finder),
         "shutdown_aria": lambda _a, _c: "Goodbye.",
     }
