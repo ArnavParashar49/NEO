@@ -170,6 +170,23 @@ def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:
     goal = (args.get("goal") or "").strip()
     if not goal:
         return "No goal provided for agent_task."
+
+    # Autonomous mode (opt-in): the model reasons over real tool results in a loop
+    # instead of pre-planning fixed steps. Falls back to the planner on any error.
+    try:
+        from config import get_config
+
+        if get_config().get("autonomous_mode", True):
+            from core.agent_loop import run_agent
+
+            result = run_agent(
+                goal, ctx,
+                on_step=lambda s: print(f"[agent] {s.tool}({s.args}) -> {s.result[:80]}"),
+            )
+            return result.answer
+    except Exception as e:
+        print(f"[agent_task] autonomous mode error, using planner fallback: {e}")
+
     orch = ctx.get("orchestrator")
     if orch and hasattr(orch, "run_planned_sync"):
         return orch.run_planned_sync(goal, ctx)
