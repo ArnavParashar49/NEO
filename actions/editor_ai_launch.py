@@ -14,15 +14,8 @@ from core.platform_utils import mod_key
 
 
 def _load_os() -> str:
-    try:
-        cfg = json.loads(
-            (Path(__file__).resolve().parent.parent / "config" / "api_keys.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        return (cfg.get("os_system") or "windows").lower()
-    except Exception:
-        return sys.platform
+    from config import get_os
+    return get_os()
 
 
 def _is_mac() -> bool:

@@ -1,6 +1,6 @@
 {
     "gemini_api_key": "YOUR_GEMINI_KEY_FROM_aistudio.google.com",
-    "os_system": "mac",
+    "os_system": "auto",
     "search_provider": "ddg_first",
     "prefer_gemini_lite": true,
     "camera_index": 0,

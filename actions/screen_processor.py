@@ -74,7 +74,8 @@ def _get_api_key() -> str:
 
 
 def _get_os() -> str:
-    return _load_config().get("os_system", "windows").lower()
+    from config import get_os
+    return get_os()
 
 _LIVE_MODEL         = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 _CHANNELS           = 1

@@ -7,9 +7,13 @@ from here:
     from config import get_config, get_api_key, get_os
 """
 import json
+import platform
 from pathlib import Path
 
 _CONFIG_PATH = Path(__file__).parent / "api_keys.json"
+
+_VALID_OS = {"windows", "mac", "linux"}
+_PLATFORM_OS = {"Darwin": "mac", "Windows": "windows", "Linux": "linux"}
 
 
 def get_config() -> dict:
@@ -31,9 +35,24 @@ def get_api_key(name: str = "gemini_api_key", *, required: bool = True) -> str:
     return cfg.get(name, "") or ""
 
 
+def detect_os() -> str:
+    """The actual running OS as 'windows' | 'mac' | 'linux'."""
+    return _PLATFORM_OS.get(platform.system(), "linux")
+
+
 def get_os() -> str:
-    """Returns: 'windows' | 'mac' | 'linux'"""
-    return get_config().get("os_system", "windows").lower()
+    """OS id: 'windows' | 'mac' | 'linux'.
+
+    Auto-detected from the running platform. The optional config "os_system" is
+    honored ONLY when explicitly set to one of those three values (a manual
+    override); anything else ("auto", missing, or invalid) falls back to
+    detection — so a config copied from another machine never forces the wrong OS.
+    """
+    try:
+        override = str(get_config().get("os_system", "")).strip().lower()
+    except Exception:
+        override = ""
+    return override if override in _VALID_OS else detect_os()
 
 def is_windows() -> bool: return get_os() == "windows"
 def is_mac()     -> bool: return get_os() == "mac"

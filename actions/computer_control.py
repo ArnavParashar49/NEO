@@ -40,7 +40,8 @@ def _load_config() -> dict:
         return {}
 
 def _get_os() -> str:
-    return _load_config().get("os_system", "windows").lower()
+    from config import get_os
+    return get_os()
 
 
 def _get_api_key() -> str:
