@@ -9,6 +9,11 @@ venv/
 # Secrets & local config
 config/api_keys.json
 
+# Personal memory data (local only — names, contacts, remembered faces)
+memory/long_term.json
+memory/face_registry.json
+memory/face_db/
+
 # OS / IDE
 .DS_Store
 .idea/
