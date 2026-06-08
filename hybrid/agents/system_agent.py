@@ -24,7 +24,6 @@ _SYSTEM_TOOLS = frozenset({
     "dev_agent",
     "project_builder",
     "browser_control",
-    "game_updater",
     "download_control",
 })
 
