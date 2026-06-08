@@ -77,6 +77,51 @@ def _send_email_impl(params: dict, player) -> str:
             )
         return _send_confirmed(to, browser, player)
 
+    # Preferred UX: reuse the main window (the one shown on siri-bar double-click)
+    # to ask ONLY for the recipient address — typed, so no STT typos — then let
+    # the AI write the subject + body. Falls back to the voice flow when headless.
+    ask_addr = getattr(player, "ask_email_address", None)
+    if callable(ask_addr):
+        addr = to if "@" in to else ""
+        if not addr and to:
+            try:
+                from actions.contacts import resolve_email
+
+                resolved, _msg = resolve_email(to)
+                if resolved:
+                    addr = resolved
+            except Exception:
+                pass
+        who = to or addr
+        typed = ask_addr(
+            prompt=(
+                f"Who should I email{f' — {who}' if who else ''}? "
+                "Type the email address and press Enter."
+            ),
+            prefill=addr,
+        )
+        notify = getattr(player, "notify", None)
+        if not typed or typed.strip().lower() in ("cancel", "stop", "no", "nevermind"):
+            _pending_draft = None
+            if notify:
+                notify("Okay — cancelled the email.")
+            return "CANCELLED: Email cancelled."
+        addr = typed.strip()
+        if "@" not in addr:
+            if notify:
+                notify("That doesn't look like an email address — cancelled.")
+            return "CANCELLED: That doesn't look like an email address."
+        if notify:
+            notify(f"Writing your email to {addr}…")
+        subject, body = _ai_compose(to or addr, subject, body)
+        result = _compose_and_send(addr, subject, body, browser, player)
+        if notify:
+            if result.startswith("SENT"):
+                notify(f"✅ Sent your email to {addr}.")
+            elif result.startswith(("SEND_FAILED", "NEEDS_LOGIN")):
+                notify(f"⚠️ Couldn't send — {result.split(':', 1)[-1].strip()[:90]}")
+        return result
+
     # Resolve name → email via contacts
     if to and "@" not in to:
         from actions.contacts import resolve_email
@@ -145,6 +190,120 @@ def _compose_native(
         )
 
     return _confirmation_message(to, subject)
+
+
+def _sender_name() -> str:
+    """Best-effort: the user's name from long-term memory (for the sign-off)."""
+    try:
+        from memory.memory_manager import load_memory
+
+        entry = (load_memory().get("identity") or {}).get("name")
+        if isinstance(entry, dict):
+            return (entry.get("value") or "").strip()
+        return entry.strip() if isinstance(entry, str) else ""
+    except Exception:
+        return ""
+
+
+def _ai_compose(to_label: str, subject: str, body: str) -> tuple[str, str]:
+    """Always write a complete, professional email from the user's gist — proper
+    greeting, context, courteous closing, and a sign-off with the user's name
+    (pulled from memory). The incoming subject/body are treated as the intent,
+    not the final text."""
+    gist = " — ".join(p for p in (subject.strip(), body.strip()) if p) or "a brief, friendly message"
+    sender = _sender_name()
+    recipient = (to_label or "the recipient").strip()
+
+    try:
+        from core.llm import ask_json
+
+        data = ask_json(
+            "Write a complete, polished, PROFESSIONAL email on the user's behalf. "
+            "Expand the gist into a real email — do not just repeat it.\n\n"
+            f"Recipient name: {recipient}\n"
+            f"What the user wants to say (gist): {gist}\n"
+            f"Sender's name for the sign-off: {sender or '(unknown)'}\n\n"
+            'Return ONLY JSON: {"subject": "...", "body": "..."}\n\n'
+            "The body MUST include, on their own lines:\n"
+            "1. A greeting — 'Dear <recipient first name>,' (or 'Hi <first name>,').\n"
+            "2. 2-4 polite, clear sentences that fully express the message with context.\n"
+            "3. A courteous closing line (e.g. 'Thank you for your time and consideration.').\n"
+            "4. A sign-off: 'Best regards,' then the sender's name on the next line.\n\n"
+            "Rules: warm and professional; correct grammar and punctuation; NEVER use "
+            "bracket placeholders like [Your Name] — if the sender's name is unknown, "
+            "end at 'Best regards,'. Plain text only, no markdown.",
+            model="gemini-2.5-flash",
+        )
+        s = (data.get("subject") or subject or "Hello").strip()
+        b = (data.get("body") or body).strip()
+        return (s or "Hello"), (b or body)
+    except Exception as e:
+        print(f"[Email] AI compose failed ({e}); using original draft.")
+        return (subject or "Hello"), body
+
+
+def _compose_and_send(
+    to: str,
+    subject: str,
+    body: str,
+    browser: str | None,
+    player,
+) -> str:
+    """Open a Gmail draft and send it — used after the typed-compose form,
+    where the user's Send click is the confirmation."""
+    global _pending_draft
+
+    qs = f"view=cm&fs=1&to={quote(to)}"
+    if subject:
+        qs += f"&su={quote(subject)}"
+    if body:
+        qs += f"&body={quote(body)}"
+    url = f"https://mail.google.com/mail/?{qs}"
+    _pending_draft = {"to": to, "subject": subject, "body": body}
+    _log(player, f"Gmail compose (typed form) → {to}")
+
+    app = "Safari" if browser and browser.lower() in ("safari",) else "Google Chrome"
+    open_in_user_browser(url, browser)
+    activate_app(app)
+    time.sleep(1.0)
+
+    current = wait_for_url(timeout=14.0, browser=browser) or get_front_browser_url(browser)
+    if is_login_url(current):
+        return "NEEDS_LOGIN: Sign in to Google in Chrome, then ask me to send it again."
+
+    # Give the compose overlay time to render, then click Send directly in the
+    # DOM. (URL detection is unreliable: ?view=cm redirects to the inbox with
+    # compose as an overlay, so the tab URL usually has no compose marker.)
+    time.sleep(2.2)
+
+    detail = ""
+    for _ in range(6):
+        detail = gmail_click_send(browser)
+        if detail == "clicked":
+            _pending_draft = None
+            _log(player, f"sent (Send button) → {to}")
+            return f"SENT: Email sent to {to}."
+        if detail in ("unsupported_os", "safari_not_supported"):
+            break
+        time.sleep(0.7)
+
+    # DOM click unavailable (e.g. Chrome's "Allow JavaScript from Apple Events"
+    # is off) — fall back to Gmail's keyboard send shortcut.
+    try:
+        import pyautogui
+
+        activate_app(app)
+        time.sleep(0.4)
+        pyautogui.hotkey("command", "enter")
+        time.sleep(1.0)
+        _pending_draft = None
+        _log(player, f"sent (cmd+enter; js={detail}) → {to}")
+        return f"SENT: Email sent to {to}."
+    except Exception as e:
+        return (
+            f"SEND_FAILED: Couldn't send to {to} ({detail}; {e}). "
+            "The draft is open in Chrome — click Send."
+        )
 
 
 def _confirmation_message(to: str, subject: str) -> str:
