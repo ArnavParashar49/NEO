@@ -536,6 +536,7 @@ class MainWindow(QMainWindow):
         self._mic_live        = False
         self._current_file: str | None = None
         self._ui_state        = "INITIALISING"
+        self._email_capture   = None  # holder dict while awaiting a typed email address
 
         central = QWidget()
         central.setObjectName("ariaExpandedShell")
@@ -851,11 +852,30 @@ class MainWindow(QMainWindow):
         self._set_status_ui(text, color)
         self._style_mute_btn()
 
+    def begin_email_capture(self, holder: dict) -> None:
+        """Arm the command input to capture the next line as an email address."""
+        self._email_capture = holder
+        self._log.append_log(f"ARIA: {holder.get('prompt', 'Type the email address.')}")
+        self._cmd.line_edit.setText(holder.get("prefill", ""))
+        self._cmd.line_edit.setFocus()
+        self._cmd.line_edit.selectAll()
+
     def _send(self):
         txt = self._cmd.line_edit.text().strip()
         if not txt:
             return
         self._cmd.line_edit.clear()
+
+        # If we're waiting for a typed email address, consume this line for that
+        # instead of sending it to the model.
+        cap = self._email_capture
+        if cap is not None:
+            self._email_capture = None
+            self._log.append_log(f"You: {txt}")
+            cap["result"] = txt
+            cap["event"].set()
+            return
+
         self._log.append_log(f"You: {txt}")
         if self.on_text_command:
             threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start()
@@ -925,6 +945,7 @@ class _UiDispatcher(QObject):
     begin_camera_session = pyqtSignal(int, int)  # camera_index, backend
     hide_camera_preview = pyqtSignal()
     set_camera_status = pyqtSignal(str)
+    request_email = pyqtSignal(object)  # holder; show main window + capture typed address
 
 
 class AriaUI:
@@ -960,6 +981,10 @@ class AriaUI:
         )
         self._dispatch.set_camera_status.connect(
             self._set_camera_status_main,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._dispatch.request_email.connect(
+            self._request_email_main,
             Qt.ConnectionType.QueuedConnection,
         )
         if self._siri_mode:
@@ -1015,6 +1040,52 @@ class AriaUI:
     def _request_siri_collapse(self) -> None:
         if self._siri:
             self._siri.req_collapse_panel.emit()
+
+    def notify(self, text: str) -> None:
+        """Thread-safe: post a status line to the conversation panel.
+
+        Visual feedback that does not depend on TTS (free-tier voice quota can
+        run out), so the user always sees what ARIA is doing.
+        """
+        try:
+            self._win._log.append_log(text)  # append_log is signal-backed / thread-safe
+        except Exception:
+            pass
+
+    # --- email address capture (reuses the main window, no extra dialog) ----
+    def _request_email_main(self, holder: dict) -> None:
+        """Main thread: grow the siri bar into the full panel, then arm capture."""
+        try:
+            if self._siri and self._siri_mode:
+                if not self._siri.is_expanded():
+                    self._siri.expand_panel()  # animates orb → full panel
+                self._siri.raise_(); self._siri.activateWindow()
+            else:
+                self._win.show(); self._win.raise_(); self._win.activateWindow()
+            self._win.begin_email_capture(holder)
+        except Exception as e:
+            print(f"[UI] email capture failed: {e}")
+            holder["result"] = None
+            holder["event"].set()
+
+    def ask_email_address(self, prompt: str = "", prefill: str = "") -> str | None:
+        """Worker-thread safe: ask for the recipient in the main window's input.
+
+        Shows the window (as on siri-bar double-click), posts `prompt` in the
+        conversation, and returns the next line the user types — or None on
+        timeout/cancel. The AI composes the actual email; this is only the address.
+        """
+        import threading
+
+        holder: dict = {
+            "event": threading.Event(),
+            "result": None,
+            "prompt": prompt or "Who should I email? Type the email address.",
+            "prefill": prefill or "",
+        }
+        self._dispatch.request_email.emit(holder)
+        holder["event"].wait(timeout=180)
+        return holder["result"]
 
     @property
     def manual_mute(self) -> bool:
