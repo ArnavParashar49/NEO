@@ -20,16 +20,7 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 MODEL = "gemini-2.5-flash"
 
 
-def _api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
-
-
-def _model():
-    import google.generativeai as genai
-
-    genai.configure(api_key=_api_key())
-    return genai.GenerativeModel(MODEL)
+from core.llm import ask
 
 
 def _strip_fences(text: str) -> str:
@@ -168,8 +159,8 @@ Rules:
 
 JSON:"""
 
-    response = _model().generate_content(prompt)
-    data = _parse_json(response.text)
+    response = ask(prompt, model=MODEL)
+    data = _parse_json(response)
 
     data.setdefault("project_name", "new_project")
     data.setdefault("project_kind", "software project")
@@ -240,8 +231,8 @@ Rules for user_brief: spoken summary, no code.
 JSON:"""
 
     try:
-        response = _model().generate_content(prompt)
-        data = _parse_json(response.text)
+        response = ask(prompt, model=MODEL)
+        data = _parse_json(response)
     except Exception as e:
         print(f"[ProjectResearch] synthesize_brief fallback: {e}")
         data = _fallback_brief(session)

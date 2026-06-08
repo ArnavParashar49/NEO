@@ -19,5 +19,7 @@ config/api_keys.json
 cache/
 *.log
 
-# Optional: download yolov8n.pt on first run if omitted
-# yolov8n.pt
+# Model weights — downloaded on first run (see VISION_PRIVACY.md)
+yolov8n.pt
+*.pt
+*.onnx

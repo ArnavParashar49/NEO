@@ -1,0 +1,5 @@
+# Developer tooling (not needed to run ARIA).
+#   pip install -r requirements-dev.txt
+ruff>=0.8
+mypy>=1.13
+pre-commit>=4.0

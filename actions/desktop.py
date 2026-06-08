@@ -23,11 +23,6 @@ def _get_base_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 
-def _get_api_key() -> str:
-    path = _get_base_dir() / "config" / "api_keys.json"
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
-    
 def _get_desktop() -> Path:
     if _OS == "Linux":
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
@@ -103,9 +98,7 @@ def _execute_generated_code(code: str, player=None) -> str:
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
 
-    import google.generativeai as genai
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    from core.llm import ask
 
     desktop = str(_get_desktop())
 
@@ -143,8 +136,7 @@ Output ONLY the Python code. No explanation, no markdown, no backticks.
 Task: {task}"""
 
     try:
-        response = model.generate_content(prompt)
-        code = response.text.strip()
+        code = ask(prompt, model="gemini-2.5-flash")
         if code.startswith("```"):
             lines = code.split("\n")
             code  = "\n".join(lines[1:-1]).strip()
@@ -377,7 +369,7 @@ def clean_desktop(params: dict | None = None) -> str:
     from actions import confirm_gate as cg
 
     params = params or {}
-    proceed, stored, err = cg.consume_confirmed(params)
+    proceed, stored, err = cg.consume_confirmed(params, "desktop_clean")
     if err:
         return err
 

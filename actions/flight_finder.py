@@ -19,8 +19,8 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from config import get_api_key
+    return get_api_key()
 
 _MONTH_MAP: dict[str, int] = {
 
@@ -62,15 +62,13 @@ def _parse_date(raw: str) -> str:
             return val.strftime("%Y-%m-%d")
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=_get_api_key())
-        model    = genai.GenerativeModel("gemini-2.5-flash-lite")
-        response = model.generate_content(
+        from core.llm import ask
+        result = ask(
             f"Today is {today.strftime('%Y-%m-%d')}. "
             f"Convert this date expression to YYYY-MM-DD: '{raw}'. "
-            f"Return ONLY the date string, nothing else."
+            f"Return ONLY the date string, nothing else.",
+            model="gemini-2.5-flash-lite",
         )
-        result = response.text.strip()
         if re.match(r"\d{4}-\d{2}-\d{2}", result):
             return result
     except Exception as e:
@@ -152,17 +150,7 @@ def _parse_flights_with_gemini(
     destination: str,
     date:        str,
 ) -> list[dict]:
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=(
-            "You are a flight data extraction expert. "
-            "Extract flight information from raw webpage text. "
-            "Return ONLY valid JSON — no markdown, no explanation."
-        ),
-    )
+    from core.llm import ask_json
 
     prompt = (
         f"Extract flight options from {origin} to {destination} on {date} "
@@ -174,9 +162,15 @@ def _parse_flights_with_gemini(
     )
 
     try:
-        response = model.generate_content(prompt)
-        text     = re.sub(r"```(?:json)?", "", response.text).strip().rstrip("`").strip()
-        flights  = json.loads(text)
+        flights = ask_json(
+            prompt,
+            model="gemini-2.5-flash",
+            system=(
+                "You are a flight data extraction expert. "
+                "Extract flight information from raw webpage text. "
+                "Return ONLY valid JSON — no markdown, no explanation."
+            ),
+        )
         return flights if isinstance(flights, list) else []
     except Exception as e:
         print(f"[FlightFinder] ⚠️ Gemini parse failed: {e}")

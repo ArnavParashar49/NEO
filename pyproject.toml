@@ -1,0 +1,39 @@
+# Tooling configuration for ARIA.
+#
+# NOTE: this project installs via the custom `setup.py` script (pip + playwright),
+# so this file intentionally carries ONLY tool config — no [project]/build metadata.
+#
+# Dev tools (ruff, mypy, pre-commit) live in requirements-dev.txt:
+#     pip install -r requirements-dev.txt
+#     ruff check .            # lint
+#     ruff check --fix .      # lint + autofix (unused imports, import order)
+#     ruff format .           # format
+#     mypy core actions hybrid
+#     pre-commit install      # run lint automatically on git commit
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "models", "assets", "cache", "yolov8n.pt"]
+
+[tool.ruff.lint]
+# Start lenient: pyflakes (unused imports/vars, undefined names) + import sorting.
+# Expand later with "UP" (pyupgrade), "B" (bugbear), "SIM" (simplify) once the
+# codebase is clean against this baseline.
+select = ["F", "I"]
+ignore = [
+    "F401",  # keep for now: many modules re-export via imports; enable per-package later
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F811"]
+
+[tool.mypy]
+python_version = "3.12"
+# Gradual typing: don't fail on the large untyped surface yet — surface real bugs only.
+ignore_missing_imports = true
+follow_imports = "silent"
+check_untyped_defs = false
+warn_unused_ignores = false
+warn_return_any = false
+exclude = "(^\\.venv/|^models/|^assets/)"
