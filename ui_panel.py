@@ -214,6 +214,10 @@ class ChatView(QScrollArea):
         self.setWidget(self._host)
         self._stream_bubble = None
 
+    @property
+    def _aria_stream_active(self) -> bool:
+        return self._stream_bubble is not None
+
     # --- internals ----------------------------------------------------------
     def _add(self, widget) -> None:
         self._lay.insertWidget(self._lay.count() - 1, widget)  # before the stretch
@@ -251,6 +255,10 @@ class ChatView(QScrollArea):
             self._add(self._system("📎 " + t.split(":", 1)[1].strip()))
         else:
             self._add(self._system(t))
+
+    # bubbles render instantly, so "instant" == normal append
+    def append_log_instant(self, text: str) -> None:
+        self.append_log(text)
 
     def update_aria_stream(self, body: str) -> None:
         if not body:
