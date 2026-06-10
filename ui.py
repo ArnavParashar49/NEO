@@ -591,7 +591,7 @@ class MainWindow(QMainWindow):
         lay.setSpacing(11)
 
         avatar = PixelBuddy()
-        avatar.setFixedSize(44, 44)
+        avatar.setFixedSize(64, 64)
         avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(avatar)
 
@@ -807,22 +807,9 @@ class MainWindow(QMainWindow):
                 """
             )
         elif self._standby:
-            self._mute_btn.setText("Standby — say Hey Aria or clap twice")
-            self._mute_btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    border-radius: {radius}px;
-                    {font}
-                    background: {C.SURFACE2};
-                    color: {C.TEXT_DIM};
-                    border: 1px solid #2a2a30;
-                }}
-                QPushButton:hover {{
-                    background: #2a2a30;
-                    color: {C.TEXT};
-                }}
-                """
-            )
+            # No standby button in the window — the menu bar + wake word cover this.
+            self._mute_btn.hide()
+            return
         else:
             self._mute_btn.setText("Mic off — tap to listen")
             self._mute_btn.setStyleSheet(
