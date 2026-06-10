@@ -11,8 +11,7 @@ import math
 import random
 
 from PyQt6.QtCore import QPointF, Qt, QTimer
-from PyQt6.QtGui import QColor
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QColor, QPainter, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
 # --- palette ---------------------------------------------------------------
@@ -138,17 +137,25 @@ class PixelBuddy(QWidget):
         self.update()
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self._spin is None:
-            self._spin = 0.0     # kick off a 360 spin
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._spin = 0.0     # (re)start a clean 360
+
+    # public hooks (used when the host window owns the mouse, e.g. the Siri bar)
+    def hover(self, on: bool) -> None:
+        self._hover = bool(on)
+        self.update()
+
+    def spin(self) -> None:
+        self._spin = 0.0     # (re)start — clicking again always resets it
 
     # --- animation ----------------------------------------------------------
     def _step(self) -> None:
         self._t += 0.033
         self._energy_s += (self._energy - self._energy_s) * 0.2
         if self._spin is not None:
-            self._spin += 0.05
+            self._spin += 0.08
             if self._spin >= 1.0:
-                self._spin = None
+                self._spin = None     # done -> always settles back facing left
         if self._t >= self._next_blink and self._blink_until == 0.0:
             self._blink_until = self._t + 0.14
             self._next_blink = self._t + random.uniform(2.2, 5.5)
@@ -159,8 +166,6 @@ class PixelBuddy(QWidget):
     def _face_key(self) -> str:
         if self._preview_pose:
             return self._preview_pose
-        if self._spin is not None or self._hover:
-            return "happy"
         if self._blink_until:
             return "blink"
         if (self._speaking or self._state == "SPEAKING") and int(self._t * 6) % 2 == 0:
@@ -170,16 +175,15 @@ class PixelBuddy(QWidget):
     # --- paint --------------------------------------------------------------
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         gh, gw = len(_BODY), len(_BODY[0])
         w, h = self.width(), self.height()
-        ps = max(1, int(min(w / (gw + 1.5), h / (gh + 2))))
+        ps = max(1, int(min(w / (gw + 4), h / (gh + 5))))   # smaller + room for glow
         sprite_w, sprite_h = gw * ps, gh * ps
 
         # gentle hover bob (robots float a touch)
         e = self._energy_s
-        amp = 0.8 + (1.4 if self._state in ("LISTENING", "SPEAKING") else 0.0) + e * 2.0
+        amp = 0.6 + (1.0 if self._state in ("LISTENING", "SPEAKING") else 0.0) + e * 1.6
         bob = math.sin(self._t * (3.2 if self._state == "STANDBY" else 4.6)) * amp
 
         # click spin (cos: 1 -> -1 -> 1 = a full turn) + a little hop
@@ -187,17 +191,32 @@ class PixelBuddy(QWidget):
         hop = math.sin(self._spin * math.pi) * ps * 2.2 if self._spin is not None else 0.0
 
         ox = (w - sprite_w) / 2.0
-        oy_ground = (h - sprite_h) / 2.0 - bob - ps
-        oy = oy_ground - hop
-
-        # shadow stays on the ground; shrinks when the robot lifts
-        sh_w = sprite_w * (0.52 - bob * 0.008 - hop * 0.012)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(0, 0, 0, 75))
-        p.drawEllipse(QPointF(w / 2.0, oy_ground + sprite_h + ps * 0.4),
-                      max(ps, sh_w / 2.0), ps * 0.9)
-
+        oy_ground = (h - sprite_h) / 2.0 - bob
+        oy = oy_ground - hop - (ps * 0.7 if self._hover else 0.0)  # hover = small perk up
         dim = 0.9 if (self._muted or self._state == "STANDBY") else 1.0
+
+        # emissive screen glow — makes the CRT look lit, not flat (antialiased)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        scx, scy = w / 2.0, oy + sprite_h * 0.36
+        glow_r = sprite_w * (0.64 + e * 0.12)
+        glow_a = (66 if self._state == "STANDBY" else 104) + int(e * 80) + (55 if self._hover else 0)
+        sc = self._screen
+        g = QRadialGradient(scx, scy, glow_r)
+        g.setColorAt(0.0, QColor(sc.red(), sc.green(), sc.blue(), min(160, glow_a)))
+        g.setColorAt(0.5, QColor(sc.red(), sc.green(), sc.blue(), int(glow_a * 0.34)))
+        g.setColorAt(1.0, QColor(sc.red(), sc.green(), sc.blue(), 0))
+        p.setBrush(g)
+        p.drawEllipse(QPointF(scx, scy), glow_r, glow_r)
+
+        # grounding shadow
+        sh_w = sprite_w * (0.5 - bob * 0.008 - hop * 0.012)
+        p.setBrush(QColor(0, 0, 0, 80))
+        p.drawEllipse(QPointF(scx, oy_ground + sprite_h + ps * 0.4),
+                      max(ps, sh_w / 2.0), ps * 0.85)
+
+        # crisp pixels from here
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         def cell(cx_, ry, col):
             c = col
