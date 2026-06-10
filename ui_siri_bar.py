@@ -1171,7 +1171,13 @@ class SiriBarWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
         self.raise_()
 
-        anim = self._run_geometry_anim(orb_geo, end, _EXPAND_MS)
+        # grow out of the robot's spot while fading in — feels like the window
+        # opens from the buddy's face (the fade also hides the cram-reflow).
+        anim = self._run_geometry_anim(
+            orb_geo, end, _EXPAND_MS,
+            easing=QEasingCurve.Type.OutCubic,
+            fade=(0.0, 1.0),
+        )
 
         def _on_expand_done() -> None:
             self._animating = False
@@ -1226,6 +1232,7 @@ class SiriBarWindow(QWidget):
             orb_end = self._orb_rect_from_panel(self.geometry())
             self._detach_body_content()
             self._apply_disc_size()
+            self.setWindowOpacity(1.0)   # robot returns fully opaque
             if self._visible_target:
                 self.setGeometry(orb_end)
                 self.show()
@@ -1252,7 +1259,11 @@ class SiriBarWindow(QWidget):
             end = self._orb_rect_from_panel(start)
             self._docked = False
             self.clearMask()
-            anim = self._run_geometry_anim(start, end, _COLLAPSE_MS)
+            anim = self._run_geometry_anim(
+                start, end, _COLLAPSE_MS,
+                easing=QEasingCurve.Type.InCubic,
+                fade=(self.windowOpacity(), 0.0),
+            )
             anim.finished.connect(_finish_compact)
         else:
             _finish_compact()
