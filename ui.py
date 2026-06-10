@@ -39,6 +39,7 @@ _DEFAULT_W, _DEFAULT_H = 440, 400
 _MIN_W,     _MIN_H     = 360, 280
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+_UI_FONT_FAMILY = ".AppleSystemUIFont" if _OS == "Darwin" else "Segoe UI"
 
 from ui_theme import (
     C,
@@ -283,8 +284,8 @@ class CommandBar(QWidget):
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        attach = QPushButton("Attach")
-        attach.setFixedHeight(40)
+        attach = QPushButton("＋")
+        attach.setFixedSize(40, 40)
         attach.setToolTip("Attach a file")
         attach.setCursor(Qt.CursorShape.PointingHandCursor)
         attach.setStyleSheet(self._icon_btn_style())
@@ -292,14 +293,15 @@ class CommandBar(QWidget):
         row.addWidget(attach)
 
         self.line_edit = QLineEdit()
-        self.line_edit.setPlaceholderText("Ask ARIA anything…")
-        self.line_edit.setFont(QFont(_MONO_FONT, 12))
+        self.line_edit.setPlaceholderText("Message ARIA…")
+        self.line_edit.setFont(QFont(_UI_FONT_FAMILY, 13))
         self.line_edit.setFixedHeight(40)
         self.line_edit.setStyleSheet(self._input_style)
         row.addWidget(self.line_edit, stretch=1)
 
-        send = QPushButton("Send")
-        send.setFixedSize(64, 40)
+        send = QPushButton("↑")
+        send.setFixedSize(40, 40)
+        send.setFont(QFont(_UI_FONT_FAMILY, 16, QFont.Weight.Bold))
         send.setCursor(Qt.CursorShape.PointingHandCursor)
         send.setStyleSheet(primary_button_stylesheet())
         send.clicked.connect(self.line_edit.returnPressed.emit)
@@ -585,44 +587,49 @@ class MainWindow(QMainWindow):
         from ui_buddy import PixelBuddy
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(4, 0, 4, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(6, 2, 6, 2)
+        lay.setSpacing(11)
 
         avatar = PixelBuddy()
-        avatar.setFixedSize(40, 40)
+        avatar.setFixedSize(44, 44)
         avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(avatar)
 
+        tcol = QVBoxLayout()
+        tcol.setSpacing(2)
+        tcol.setContentsMargins(0, 0, 0, 0)
         title = QLabel("ARIA")
-        title.setStyleSheet(f"color: {C.TEXT}; background: transparent; {ui_font(18, bold=True)}")
-        lay.addWidget(title)
+        title.setStyleSheet(
+            f"color: {C.TEXT}; background: transparent; letter-spacing: 2px; {ui_font(15, bold=True)}"
+        )
+        tcol.addWidget(title)
 
-        lay.addStretch()
-
+        srow = QHBoxLayout()
+        srow.setSpacing(5)
+        srow.setContentsMargins(0, 0, 0, 0)
         self._status_dot = QLabel("●")
-        self._status_dot.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent; font-size: 10pt;")
-        lay.addWidget(self._status_dot)
-
+        self._status_dot.setStyleSheet(
+            f"color: {C.TEXT_MED}; background: transparent; font-size: 9pt;"
+        )
+        srow.addWidget(self._status_dot)
         self._status_lbl = QLabel("Starting…")
         self._status_lbl.setStyleSheet(
-            f"color: {C.TEXT_DIM}; background: transparent; {ui_font(11)}"
+            f"color: {C.TEXT_DIM}; background: transparent; {ui_font(10)}"
         )
-        lay.addWidget(self._status_lbl)
+        srow.addWidget(self._status_lbl)
+        srow.addStretch()
+        tcol.addLayout(srow)
 
+        lay.addLayout(tcol)
+        lay.addStretch()
         return w
 
     def _build_main_panel(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(12, 8, 12, 10)
+        lay.setContentsMargins(12, 4, 12, 10)
         lay.setSpacing(10)
-
-        conv_label = QLabel("Conversation")
-        conv_label.setStyleSheet(
-            f"color: {C.TEXT_MED}; background: transparent; {ui_font(10, bold=True)}"
-        )
-        lay.addWidget(conv_label)
 
         self._log_progress_lbl = QLabel("")
         self._log_progress_lbl.setStyleSheet(
@@ -677,7 +684,7 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 4, 4, 4)
 
-        self._shrink_btn = QPushButton("F4 mute  ·  click here to shrink")
+        self._shrink_btn = QPushButton("⌄  Shrink to buddy")
         self._shrink_btn.setFlat(True)
         self._shrink_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._shrink_btn.setStyleSheet(
@@ -688,21 +695,21 @@ class MainWindow(QMainWindow):
                 border: none;
                 text-align: left;
                 padding: 2px 0;
-                {ui_font(9)}
+                {ui_font(10)}
             }}
             QPushButton:hover {{
-                color: {C.TEXT};
+                color: #6fe3d6;
             }}
             """
         )
         self._shrink_btn.clicked.connect(self.panel_collapse_requested.emit)
         lay.addWidget(self._shrink_btn, stretch=1)
-        sub = QLabel("Voice assistant")
-        sub.setStyleSheet(
+        hint = QLabel("F4 to mute")
+        hint.setStyleSheet(
             f"color: {C.PRI_GHO}; background: transparent; {ui_font(9)}"
         )
-        sub.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        lay.addWidget(sub)
+        hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lay.addWidget(hint)
         return w
 
     def _start_search_progress(self, eta_sec: int):
@@ -773,7 +780,7 @@ class MainWindow(QMainWindow):
         if self._manual_mute:
             print("[ARIA] Microphone muted.")
         elif self._standby:
-            print("[ARIA] Standby — say 'Aria' or clap twice.")
+            print("[ARIA] Standby — say 'Hey Aria' or clap twice.")
         else:
             print("[ARIA] Microphone active.")
 
@@ -800,7 +807,7 @@ class MainWindow(QMainWindow):
                 """
             )
         elif self._standby:
-            self._mute_btn.setText("Standby — say Aria or clap twice")
+            self._mute_btn.setText("Standby — say Hey Aria or clap twice")
             self._mute_btn.setStyleSheet(
                 f"""
                 QPushButton {{
@@ -1055,11 +1062,7 @@ class AriaUI:
     def _tray_toggle(self) -> None:
         """Left click — pop ARIA out, or tuck it away if already showing."""
         if self._siri and self._siri_mode:
-            if self._siri.isVisible() and not self._siri.is_camera_mode():
-                self._siri.req_schedule_hide.emit(0)
-            else:
-                self._siri.req_cancel_hide.emit()
-                self._siri.req_show_compact.emit()
+            self._siri.req_toggle.emit()
         elif self._win.isVisible():
             self._win.hide()
         else:

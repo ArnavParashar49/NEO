@@ -56,10 +56,10 @@ class AriaTray(QSystemTrayIcon):
         # left click to open the menu. We pop it manually on right click so the
         # left click stays a Siri-style "summon".
         menu = QMenu()
-        show_act = menu.addAction("Show ARIA")
+        show_act = menu.addAction("Show App")
         show_act.triggered.connect(lambda: self._on_show())
         menu.addSeparator()
-        quit_act = menu.addAction("Quit ARIA")
+        quit_act = menu.addAction("Quit")
         quit_act.triggered.connect(lambda: self._on_quit())
         self._menu = menu
 

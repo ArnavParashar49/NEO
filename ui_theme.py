@@ -84,11 +84,11 @@ def expanded_shell_stylesheet() -> str:
 
 
 def panel_card_stylesheet() -> str:
-    """Matches the orb disc: dark glass + soft white rim + round corners."""
+    """Cozy solid surface for the expanded window — readable on any desktop."""
     return f"""
         QFrame#ariaPanelCard {{
-            background: {PANEL_GLASS_BG};
-            border: 1px solid {PANEL_GLASS_BORDER};
+            background: #181d1c;
+            border: 1px solid #2c3a38;
             border-radius: {RADIUS_L}px;
         }}
     """

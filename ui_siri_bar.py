@@ -46,7 +46,8 @@ _DEFAULT_MARGIN_Y = 36
 _DEFAULT_CORNER = "top-right"
 _SLIDE_MS = 300
 _SLIDE_IN_MS = 480
-_SLIDE_IN_MS_FAST = 140
+_SLIDE_IN_MS_FAST = 260   # smooth glide-in (was a near-instant 140)
+_SLIDE_OUT_MS = 240       # smooth fade+drift out
 _SLIDE_IN_PX = 88
 _EXPAND_MS = 380
 _CAMERA_EXPAND_MS = 240
@@ -305,6 +306,7 @@ class SiriBarWindow(QWidget):
     req_slide_in = pyqtSignal()
     req_slide_out = pyqtSignal()
     req_show_compact = pyqtSignal()
+    req_toggle = pyqtSignal()
     req_cancel_hide = pyqtSignal()
     req_schedule_hide = pyqtSignal(int)
     req_apply_state = pyqtSignal(str)
@@ -354,6 +356,7 @@ class SiriBarWindow(QWidget):
         self._dismiss_hint_timer.setSingleShot(True)
         # No caption text — dismiss hint is visual-only (orb stays as-is).
         self._anim: QPropertyAnimation | None = None
+        self._fade_anim: QPropertyAnimation | None = None
 
         self.setWindowFlags(
             Qt.WindowType.Window
@@ -458,6 +461,7 @@ class SiriBarWindow(QWidget):
         self.req_slide_in.connect(self.slide_in)
         self.req_slide_out.connect(self.slide_out)
         self.req_show_compact.connect(self.show_compact)
+        self.req_toggle.connect(self.toggle)
         self.req_cancel_hide.connect(self._cancel_hide)
         self.req_schedule_hide.connect(self.schedule_hide)
         self.req_apply_state.connect(self.apply_ui_state)
@@ -751,6 +755,10 @@ class SiriBarWindow(QWidget):
         self._update_window_mask()
 
     def _stop_anim(self) -> None:
+        if self._fade_anim:
+            self._fade_anim.stop()
+            self._fade_anim.deleteLater()
+            self._fade_anim = None
         if not self._anim:
             return
         self._anim.stop()
@@ -984,6 +992,23 @@ class SiriBarWindow(QWidget):
         self._slide_in_fast = fast
         self.slide_in()
 
+    def toggle(self):
+        """Tray click — pop ARIA out, or tuck it away if it's already out.
+
+        Decides on intent (_visible_target / _expanded), never on isVisible(),
+        which still reads True mid fade-out and caused the 'click does nothing'
+        glitch.
+        """
+        self._hide_timer.stop()
+        if self._expanded:
+            self.collapse_panel(animate=True, on_finished=self._slide_out_compact)
+            return
+        if self._visible_target:
+            self.slide_out()
+        else:
+            self.cancel_scheduled_hide()
+            self.show_compact()
+
     def set_prompt_text(self, text: str):
         self._prompt_sig.emit(text)
 
@@ -1003,6 +1028,7 @@ class SiriBarWindow(QWidget):
         self._apply_disc_size()
 
         if self._docked and self.isVisible() and self._visible_target and not self._expanded:
+            self.setWindowOpacity(1.0)
             self.setGeometry(end)
             self.show()
             self.raise_()
@@ -1013,6 +1039,7 @@ class SiriBarWindow(QWidget):
         self._docked = False
         self.clearMask()
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
+        self.setWindowOpacity(0.0)
         self.setGeometry(start)
         self.show()
         self.raise_()
@@ -1020,7 +1047,11 @@ class SiriBarWindow(QWidget):
         if app:
             app.processEvents()
         slide_ms = _SLIDE_IN_MS_FAST if getattr(self, "_slide_in_fast", False) else _SLIDE_IN_MS
-        anim = self._run_geometry_anim(start, end, slide_ms)
+        anim = self._run_geometry_anim(
+            start, end, slide_ms,
+            easing=QEasingCurve.Type.OutCubic,
+            fade=(0.0, 1.0),
+        )
         anim.finished.connect(lambda: setattr(self, "_docked", True))
 
     def _on_hide_timer(self) -> None:
@@ -1049,11 +1080,19 @@ class SiriBarWindow(QWidget):
         self._docked = False
         self._prompt_sig.emit("")
         start = self.geometry()
-        end = self._target_rect(offscreen=True)
-        anim = self._run_geometry_anim(start, end, _SLIDE_MS, lock_x=True)
+        # soft exit: a small drift toward the dock edge + a fade to zero
+        corner = self._layout.get("corner", _DEFAULT_CORNER)
+        drift = 40 if corner.endswith("right") else -40
+        end = QRect(start.x() + drift, start.y(), start.width(), start.height())
+        anim = self._run_geometry_anim(
+            start, end, _SLIDE_OUT_MS,
+            easing=QEasingCurve.Type.InCubic,
+            fade=(self.windowOpacity(), 0.0),
+        )
 
         def _hide():
             self.hide()
+            self.setWindowOpacity(1.0)   # reset so the next show isn't faint
 
         anim.finished.connect(_hide)
 
@@ -1239,6 +1278,8 @@ class SiriBarWindow(QWidget):
         duration: int,
         *,
         lock_x: bool = False,
+        easing: QEasingCurve.Type = QEasingCurve.Type.InOutCubic,
+        fade: tuple[float, float] | None = None,
     ):
         self._stop_anim()
         if lock_x and start.width() == end.width() and start.x() != end.x():
@@ -1255,8 +1296,19 @@ class SiriBarWindow(QWidget):
         self._anim.setDuration(duration)
         self._anim.setStartValue(start)
         self._anim.setEndValue(end)
-        self._anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._anim.setEasingCurve(easing)
         self._anim.finished.connect(_on_anim_done)
+
+        # optional parallel opacity fade for a soft, non-abrupt transition
+        if fade is not None:
+            self.setWindowOpacity(fade[0])
+            self._fade_anim = QPropertyAnimation(self, b"windowOpacity", self)
+            self._fade_anim.setDuration(duration)
+            self._fade_anim.setStartValue(fade[0])
+            self._fade_anim.setEndValue(fade[1])
+            self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._fade_anim.start()
+
         self._anim.start()
         return self._anim
 

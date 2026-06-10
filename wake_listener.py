@@ -36,9 +36,12 @@ _VOSK_MODEL_URL = (
 
 )
 
-_WAKE_WORDS = frozenset({"aria", "area", "arya", "ariya"})
+# Wake phrase is "Hey Aria". The small Vosk model mishears both words, so we
+# accept tolerant variants of the "hey" prefix and the "aria" name.
+_NAME_WORDS = frozenset({"aria", "area", "arya", "ariya"})
+_PREFIX_WORDS = frozenset({"hey", "hay", "hi", "ok", "okay", "a"})
 _WAKE_RE = re.compile(
-    r"\b(aria|area|arya|ariya)\b",
+    r"\b(hey|hay|hi|ok|okay)\s+(aria|area|arya|ariya)\b",
     re.IGNORECASE,
 )
 
@@ -259,7 +262,7 @@ class WakeWordDetector:
 
             self._model = model
 
-            grammar = json.dumps(["aria", "area", "arya", "[unk]"])
+            grammar = json.dumps(["hey aria", "hey", "aria", "area", "arya", "[unk]"])
 
             self._recognizer = KaldiRecognizer(model, self.sample_rate, grammar)
 
@@ -267,7 +270,7 @@ class WakeWordDetector:
 
             self._ready = True
 
-            print("[Wake] ✅ 'Aria' listener ready")
+            print("[Wake] ✅ 'Hey Aria' listener ready")
 
         except Exception as e:
 
@@ -297,7 +300,7 @@ class WakeWordDetector:
 
                     from vosk import KaldiRecognizer
 
-                    grammar = json.dumps(["aria", "area", "arya", "[unk]"])
+                    grammar = json.dumps(["hey aria", "hey", "aria", "area", "arya", "[unk]"])
 
                     self._recognizer = KaldiRecognizer(
 
@@ -319,11 +322,13 @@ class WakeWordDetector:
         t = text.strip().lower()
         if not t:
             return False
+        if _WAKE_RE.search(t):
+            return True
+        # also catch "hey" + "aria" split across tokens in partial results
         words = t.split()
-        if words and words[0] in _WAKE_WORDS:
-            return True
-        if len(words) <= 2 and _WAKE_RE.search(t):
-            return True
+        for i in range(len(words) - 1):
+            if words[i] in _PREFIX_WORDS and words[i + 1] in _NAME_WORDS:
+                return True
         return False
 
 
@@ -355,7 +360,7 @@ class WakeWordDetector:
                     result = json.loads(self._recognizer.Result()).get("text", "")
 
                     if self._matches_wake(result):
-                        print(f"[Wake] 🎤 Aria ({result!r})")
+                        print(f"[Wake] 🎤 Hey Aria ({result!r})")
                         self._cooldown = now + 2.0
                         self.reset()
                         return True
@@ -373,7 +378,7 @@ class WakeWordDetector:
             self._last_partial = partial
 
             if self._matches_wake(partial):
-                print(f"[Wake] 🎤 Aria ({partial!r})")
+                print(f"[Wake] 🎤 Hey Aria ({partial!r})")
                 self._cooldown = time.time() + 2.0
                 self.reset()
                 return True

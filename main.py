@@ -691,7 +691,7 @@ class AriaLive:
         self._wake_listen_blocked_until = time.time() + 0.25
         self._set_phase(MicPhase.STANDBY)
         self.ui.siri_hide_now()
-        print("[ARIA] Standby — say 'Aria' or clap twice.")
+        print("[ARIA] Standby — say 'Hey Aria' or clap twice.")
 
     def _reset_live_session_state(self) -> None:
         """Clear stuck flags after a dropped live session so wake + orb recover."""
@@ -1894,7 +1894,7 @@ class AriaLive:
                     if self._smart_mode:
                         self._user_spoke_this_turn = False
                         self._set_phase(MicPhase.STANDBY)
-                        print("[ARIA] Standby — say 'Aria' or clap twice.")
+                        print("[ARIA] Standby — say 'Hey Aria' or clap twice.")
                     else:
                         self.ui.set_state("LISTENING")
                         print("[ARIA] Online.")
