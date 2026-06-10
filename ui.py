@@ -948,6 +948,22 @@ def _siri_overlay_enabled() -> bool:
         return True
 
 
+def _hide_dock_icon() -> None:
+    """macOS: become an accessory app — live in the menu bar with no Dock icon."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        from AppKit import (
+            NSApplication,
+            NSApplicationActivationPolicyAccessory,
+        )
+        NSApplication.sharedApplication().setActivationPolicy_(
+            NSApplicationActivationPolicyAccessory
+        )
+    except Exception as e:  # pragma: no cover - best effort
+        print(f"[Tray] could not hide Dock icon: {e}")
+
+
 class _UiDispatcher(QObject):
     """Marshals UI work onto the Qt main thread."""
     hide_main = pyqtSignal()
@@ -963,6 +979,10 @@ class AriaUI:
     def __init__(self, face_path: str, size=None):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        # Menu-bar app: don't quit when the (hidden) windows close; no Dock icon.
+        self._app.setQuitOnLastWindowClosed(False)
+        _hide_dock_icon()
+        self._tray = None
         self._face_path = face_path
         self._siri_mode = _siri_overlay_enabled()
         self._dispatch = _UiDispatcher()
@@ -1006,7 +1026,49 @@ class AriaUI:
                 self._win.show()
         else:
             self._win.show()
+        self._init_tray()
         self.root = _RootShim(self._app)
+
+    def _init_tray(self) -> None:
+        """Add the macOS menu-bar status item (the robot)."""
+        try:
+            from ui_tray import AriaTray
+            self._tray = AriaTray(
+                on_toggle=self._tray_toggle,
+                on_show=self._tray_show,
+                on_quit=self._tray_quit,
+            )
+        except Exception as e:  # pragma: no cover - best effort
+            print(f"[Tray] unavailable: {e}")
+            self._tray = None
+
+    def _tray_show(self) -> None:
+        """Pop ARIA out (menu 'Show ARIA')."""
+        if self._siri and self._siri_mode:
+            self._siri.req_cancel_hide.emit()
+            self._siri.req_show_compact.emit()
+        else:
+            self._win.show()
+            self._win.raise_()
+            self._win.activateWindow()
+
+    def _tray_toggle(self) -> None:
+        """Left click — pop ARIA out, or tuck it away if already showing."""
+        if self._siri and self._siri_mode:
+            if self._siri.isVisible() and not self._siri.is_camera_mode():
+                self._siri.req_schedule_hide.emit(0)
+            else:
+                self._siri.req_cancel_hide.emit()
+                self._siri.req_show_compact.emit()
+        elif self._win.isVisible():
+            self._win.hide()
+        else:
+            self._win.show()
+            self._win.raise_()
+            self._win.activateWindow()
+
+    def _tray_quit(self) -> None:
+        self._app.quit()
 
     def _init_siri_bar(self):
         if self._siri or not self._siri_mode:
