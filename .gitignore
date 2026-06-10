@@ -24,6 +24,9 @@ memory/face_db/
 cache/
 *.log
 
+# macOS app bundle (built locally via scripts/build_macos_app.sh)
+ARIA.app/
+
 # Model weights — downloaded on first run (see VISION_PRIVACY.md)
 yolov8n.pt
 *.pt
