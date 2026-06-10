@@ -34,9 +34,10 @@ from PyQt6.QtWidgets import (
 
 from ui_hud_threejs import HAS_WEBENGINE, ThreeJSOrbCanvas
 from ui_theme import C, RADIUS_M, ui_font
+from ui_buddy import PixelBuddy
 
 _CONFIG_FILE = Path(__file__).resolve().parent / "config" / "api_keys.json"
-_ORB_SIZE = 96
+_ORB_SIZE = 72  # robot buddy — fits inside the 80px disc (no clipping, centred)
 _DISC_SIZE = 80  # circular backdrop — orb may extend past it (clipped to disc)
 _PANEL_ALPHA = 153  # ~60% opacity
 _DISMISS_LEAD_MS = 2000
@@ -228,14 +229,10 @@ class SiriOrbSlot(QWidget):
         self._stack = QStackedWidget(self)
         lay.addWidget(self._stack)
 
-        self._particles = ParticleSphereWidget()
+        self._particles = PixelBuddy()
+        self._particles.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._stack.addWidget(self._particles)
-        self._web: ThreeJSOrbCanvas | None = None
-
-        if HAS_WEBENGINE:
-            self._web = ThreeJSOrbCanvas(compact=True, transparent_bg=True)
-            self._stack.addWidget(self._web)
-            self._web.web.loadFinished.connect(self._on_web_loaded)
+        self._web = None  # robot buddy replaces the WebGL / particle sphere
 
         self._stack.setCurrentWidget(self._particles)
         self._using_web = False
@@ -261,9 +258,13 @@ class SiriOrbSlot(QWidget):
             self._web.set_audio_bands(bands)
 
     def _step(self) -> None:
-        self._particles._step()
-        if self._web:
-            self._web._step()
+        pass  # PixelBuddy self-animates via its own timer
+
+    def set_hover(self, on: bool) -> None:
+        self._particles.hover(on)
+
+    def trigger_spin(self) -> None:
+        self._particles.spin()
 
     @property
     def speaking(self) -> bool:
@@ -404,6 +405,7 @@ class SiriBarWindow(QWidget):
         self._panel = _CircleBackdrop(self._stack_host)
         self._panel.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._panel.setGeometry(0, 0, _DISC_SIZE, _DISC_SIZE)
+        self._panel.hide()  # no disc behind the robot buddy
 
         self._orb = SiriOrbSlot(self._stack_host)
         self._orb.setFixedSize(_ORB_SIZE, _ORB_SIZE)
@@ -413,6 +415,11 @@ class SiriBarWindow(QWidget):
         self._orb_timer = QTimer(self)
         self._orb_timer.timeout.connect(self._tick_orb)
         self._orb_timer.start(16)
+
+        # single-click → spin (cancelled if a double-click arrives → expand)
+        self._spin_click_timer = QTimer(self)
+        self._spin_click_timer.setSingleShot(True)
+        self._spin_click_timer.timeout.connect(self._orb.trigger_spin)
 
         # Hidden — typing opens via double-click → full window
         self._cmd = QLineEdit(self)
@@ -507,9 +514,7 @@ class SiriBarWindow(QWidget):
         ):
             self.clearMask()
             return
-        path = QPainterPath()
-        path.addEllipse(QRectF(self.rect()))
-        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        self.clearMask()   # robot buddy is square — no circular clip
 
     def _request_mute_toggle(self):
         if self._mute_toggle_cb:
@@ -1354,6 +1359,14 @@ class SiriBarWindow(QWidget):
             self.move(x, y)
         super().mouseMoveEvent(event)
 
+    def enterEvent(self, event):
+        self._orb.set_hover(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._orb.set_hover(False)
+        super().leaveEvent(event)
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
             self._dragging = False
@@ -1361,10 +1374,13 @@ class SiriBarWindow(QWidget):
             if self._drag_moved:
                 self._persist_layout_from_geometry()
                 self._docked = True
+            elif not self._expanded:
+                self._spin_click_timer.start(220)   # single click → spin
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self._expanded:
+            self._spin_click_timer.stop()   # don't spin on double-click
             self.toggle_expand()
             event.accept()
             return
