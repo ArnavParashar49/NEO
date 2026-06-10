@@ -59,6 +59,7 @@ from ui_theme import (
     ui_font,
 )
 from actions.list_format import format_list_for_log as _format_list_for_log
+from ui_panel import ChatView
 
 
 class LogWidget(QTextEdit):
@@ -373,9 +374,9 @@ class SetupOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"""
             SetupOverlay {{
-                background: rgba(0, 6, 10, 245);
-                border: 1px solid {C.BORDER_B};
-                border-radius: 6px;
+                background: #181d1c;
+                border: 1px solid #2c3a38;
+                border-radius: 18px;
             }}
         """)
 
@@ -397,8 +398,15 @@ class SetupOverlay(QWidget):
             w.setStyleSheet(f"color: {color}; background: transparent;")
             return w
 
-        layout.addWidget(_lbl("◈  INITIALISATION REQUIRED", 13, True))
-        layout.addWidget(_lbl("Configure ARIA before first boot.", 9, color=C.PRI_DIM))
+        from ui_buddy import PixelBuddy
+        _av = PixelBuddy()
+        _av.setFixedSize(62, 62)
+        _av.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        _avrow = QHBoxLayout()
+        _avrow.addStretch(1); _avrow.addWidget(_av); _avrow.addStretch(1)
+        layout.addLayout(_avrow)
+        layout.addWidget(_lbl("Let's set up ARIA", 15, True))
+        layout.addWidget(_lbl("Add your Gemini key and you're ready to go.", 9, color=C.PRI_DIM))
         layout.addSpacing(6)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
@@ -414,10 +422,10 @@ class SetupOverlay(QWidget):
         self._key_input.setFixedHeight(32)
         self._key_input.setStyleSheet(f"""
             QLineEdit {{
-                background: #000d12; color: {C.TEXT};
-                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 4px 8px;
+                background: #222b2a; color: {C.TEXT};
+                border: 1px solid #2c3a38; border-radius: 10px; padding: 6px 10px;
             }}
-            QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
+            QLineEdit:focus {{ border: 1px solid #22a89c; }}
         """)
         layout.addWidget(self._key_input)
         layout.addSpacing(12)
@@ -446,41 +454,38 @@ class SetupOverlay(QWidget):
         self._sel(detected)
         layout.addSpacing(12)
 
-        init_btn = QPushButton("▸  INITIALISE SYSTEMS")
+        init_btn = QPushButton("Start ARIA  ▸")
         init_btn.setFont(QFont("Courier New", 15, QFont.Weight.Bold))
-        init_btn.setFixedHeight(36)
+        init_btn.setFixedHeight(40)
         init_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        init_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {C.PRI};
-                border: 1px solid {C.PRI_DIM}; border-radius: 3px;
-            }}
-            QPushButton:hover {{
-                background: {C.PRI_GHO}; border: 1px solid {C.PRI};
-            }}
+        init_btn.setStyleSheet("""
+            QPushButton {
+                background: #22a89c; color: #07201c;
+                border: none; border-radius: 12px;
+            }
+            QPushButton:hover { background: #6fe3d6; }
+            QPushButton:pressed { background: #178a80; }
         """)
         init_btn.clicked.connect(self._submit)
         layout.addWidget(init_btn)
 
     def _sel(self, key: str):
         self._sel_os = key
-        pal = {"windows":(C.PRI,"#001a22"),"mac":(C.ACC2,"#1a1400"),"linux":(C.GREEN,"#001a0d")}
         for k, btn in self._os_btns.items():
             if k == key:
-                fg, bg = pal[k]
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {fg}; color: {bg};
-                        border: none; border-radius: 3px; font-weight: bold;
-                    }}
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #22a89c; color: #07201c;
+                        border: none; border-radius: 10px; font-weight: bold;
+                    }
                 """)
             else:
                 btn.setStyleSheet(f"""
                     QPushButton {{
-                        background: #000d12; color: {C.TEXT_DIM};
-                        border: 1px solid {C.BORDER}; border-radius: 3px;
+                        background: #222b2a; color: {C.TEXT_DIM};
+                        border: 1px solid #2c3a38; border-radius: 10px;
                     }}
-                    QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}
+                    QPushButton:hover {{ color: {C.TEXT}; border: 1px solid #3d514e; }}
                 """)
 
     def _submit(self):
@@ -577,10 +582,16 @@ class MainWindow(QMainWindow):
             )
 
     def _build_header(self) -> QWidget:
+        from ui_buddy import PixelBuddy
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 0, 4, 0)
         lay.setSpacing(10)
+
+        avatar = PixelBuddy()
+        avatar.setFixedSize(40, 40)
+        avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lay.addWidget(avatar)
 
         title = QLabel("ARIA")
         title.setStyleSheet(f"color: {C.TEXT}; background: transparent; {ui_font(18, bold=True)}")
@@ -637,7 +648,7 @@ class MainWindow(QMainWindow):
         self._camera_embed.setStyleSheet(embed_panel_stylesheet())
         self._camera_embed.hide()
         lay.addWidget(self._camera_embed, stretch=1)
-        self._log = LogWidget()
+        self._log = ChatView()   # bubble chat (drop-in for LogWidget)
         lay.addWidget(self._log, stretch=1)
 
         self._cmd = CommandBar()

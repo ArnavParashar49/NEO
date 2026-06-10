@@ -33,7 +33,7 @@ class C:
     # Accents
     USER      = "#ffffff"
     AI        = "#d4d4dc"
-    LINK      = "#8ab4ff"
+    LINK      = "#3fd0c0"
     # Legacy aliases
     ACCENT    = LINK
 
@@ -140,7 +140,7 @@ def command_input_stylesheet() -> str:
             padding: 8px 14px;
         }}
         QLineEdit:focus {{
-            border: 1px solid {C.BORDER_B};
+            border: 1px solid #22a89c;
             background: rgba(30, 30, 36, 0.75);
         }}
     """
@@ -179,14 +179,14 @@ def icon_button_stylesheet() -> str:
 def primary_button_stylesheet() -> str:
     return f"""
         QPushButton {{
-            background: {C.PRI};
-            color: {C.BG};
+            background: #22a89c;
+            color: #07201c;
             border: none;
             border-radius: {RADIUS_M}px;
             {ui_font(12, bold=True)}
         }}
-        QPushButton:hover {{ background: #ffffff; }}
-        QPushButton:pressed {{ background: {C.ACC2}; color: {C.BG}; }}
+        QPushButton:hover {{ background: #6fe3d6; }}
+        QPushButton:pressed {{ background: #178a80; color: #07201c; }}
     """
 
 
