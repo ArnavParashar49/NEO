@@ -218,27 +218,20 @@ def test_dev_run_refuses_outside_sandbox():
     assert "refused" in dev_run({"command": "echo hi", "project_dir": "/etc"}).lower()
 
 
-def test_project_builder_start_needs_confirm():
-    from actions import project_session as ps
+def test_project_builder_needs_description():
     from actions.project_builder import project_builder
 
-    ps.clear_session()
-    try:
-        out = project_builder({"action": "start", "description": "a snake game in python"})
-    finally:
-        ps.clear_session()
-    assert out.startswith("NEEDS_CONFIRM")
+    assert "describe" in project_builder({"action": "start", "description": ""}).lower()
 
 
-def test_project_builder_build_runs_autonomous_loop():
-    """action=build confirm=true drives run_build (the autonomous loop) and
-    returns its answer — verified with a fake loop, no network."""
+def test_project_builder_start_builds_immediately():
+    """action=start drives run_build (the autonomous loop) right away — no
+    confirmation gate — and returns its answer. Verified with a fake loop."""
     import tempfile
     from pathlib import Path
 
     import core.agent_loop as al
     from actions import project_builder as pb
-    from actions import project_session as ps
     from core.agent_loop import AgentResult
 
     seen: dict = {}
@@ -254,12 +247,9 @@ def test_project_builder_build_runs_autonomous_loop():
     try:
         al.run_build = fake_run_build
         pb.PROJECTS_DIR = Path(tempfile.mkdtemp())
-        ps.clear_session()
-        pb.project_builder({"action": "start", "description": "snake game in python"})
-        out = pb.project_builder({"action": "build", "confirm": True})
+        out = pb.project_builder({"action": "start", "description": "snake game in python"})
     finally:
         al.run_build, pb.PROJECTS_DIR = orig_run_build, orig_projects
-        ps.clear_session()
 
     assert "snake" in seen.get("goal", "").lower()
     assert "Built the snake game" in out
