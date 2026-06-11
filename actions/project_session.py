@@ -135,7 +135,7 @@ def needs_input(message: str, questions: list[str]) -> str:
 def needs_confirm_build(summary: str) -> str:
     return (
         f"NEEDS_CONFIRM: {summary} "
-        'Ask the user: "Should I open the editor and start the AI build for this?" '
+        'Ask the user: "Want me to build this now?" '
         "If yes, call project_builder with action=build and confirm true. "
         "If no, call with cancel true."
     )

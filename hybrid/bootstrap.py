@@ -97,7 +97,6 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.notes import notes_control
     from actions.open_app import open_app
     from actions.organizer import organizer_control
-    from actions.project_builder import project_builder
     from actions.reminder import reminder
     from actions.screen_act import screen_act
     from actions.screen_processor import screen_process
@@ -131,7 +130,7 @@ def _build_handlers() -> dict[str, Callable]:
         "desktop_control": _wrap_action(desktop_control),
         "code_helper": _wrap_action(code_helper),
         "dev_agent": _wrap_action(dev_agent),
-        "project_builder": _wrap_action(project_builder),
+        "project_builder": _project_builder_handler,
         "agent_task": _agent_task_handler,
         "web_search": _wrap_action(web_search_action),
         "download_control": _wrap_action(download_control),
@@ -161,6 +160,16 @@ def _save_memory_handler(args: dict, ctx: ExecutionContext) -> str:
         update_memory({category: {key: {"value": value}}})
         print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
     return "ok"  # orchestrator marks silent via tool meta
+
+
+def _project_builder_handler(args: dict, ctx: ExecutionContext) -> str:
+    """project_builder needs the full ctx so the autonomous build loop can run
+    tools and stream progress to the UI."""
+    from actions.project_builder import project_builder
+
+    return project_builder(
+        parameters=args, player=ctx.ui, speak=ctx.speak, ctx=ctx,
+    ) or "Done."
 
 
 def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:

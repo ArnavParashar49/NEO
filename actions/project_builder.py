@@ -1,248 +1,178 @@
-"""Smart project planner — researches deeply, then hands off to VS Code AI."""
+"""Autonomous project builder — ARIA researches, writes, runs, and fixes it itself.
+
+Replaces the old VS Code / Copilot handoff. On the first call it asks for one
+confirmation (the build will run & install things); after a yes it drives the
+autonomous tool-use loop (core.agent_loop.run_build) to actually build the
+project, falling back to dev_agent's fixed pipeline if the loop stalls.
+"""
 
 from __future__ import annotations
 
 import re
-import sys
-import time
+import uuid
 from pathlib import Path
 
 from actions import project_session as ps
-from actions.project_research import research_project, synthesize_brief
-
 
 PROJECTS_DIR = Path.home() / "Desktop" / "AriaProjects"
-PROMPT_FILENAME = "VSCODE_AI_PROMPT.md"
-START_HERE = "START_HERE.md"
+
+_STOP_WORDS = {
+    "build", "make", "create", "develop", "a", "an", "the", "me", "please",
+    "app", "application", "that", "to", "for", "my", "some", "simple", "new",
+    "project", "program", "can", "you", "i", "want", "need", "with",
+}
 
 
-def _memory_hint() -> str:
-    try:
-        from memory.memory_manager import load_memory, format_memory_for_prompt
-
-        return format_memory_for_prompt(load_memory())[:800]
-    except Exception:
-        return ""
-
-
-def _log(msg: str, player=None):
+def _log(msg: str, player=None) -> None:
     print(f"[ProjectBuilder] {msg}")
     if player:
-        player.write_log(f"[ProjectBuilder] {msg}")
+        try:
+            player.write_log(f"[ProjectBuilder] {msg}")
+        except Exception:
+            pass
 
 
 def _safe_name(name: str) -> str:
-    return re.sub(r"[^\w\-]", "_", (name or "new_project").strip())[:40]
+    return re.sub(r"[^\w\-]", "_", (name or "new_project").strip())[:40] or "new_project"
 
 
-def _scaffold_folder(project_dir: Path, session: dict, player=None) -> None:
-    """Minimal scaffold — the VS Code AI writes the real code."""
-    project_dir.mkdir(parents=True, exist_ok=True)
-    plan = session.get("plan") or {}
-    vscode_prompt = (session.get("vscode_prompt") or "").strip()
-    workflow = session.get("vscode_workflow") or (
-        "ARIA opens your editor AI and submits the build prompt automatically."
+def _derive_name(description: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", (description or "").lower())
+    kept = [w for w in words if w not in _STOP_WORDS][:3]
+    return "_".join(kept) or "new_project"
+
+
+def _build_goal(description: str, proj_name: str, project_dir: Path) -> str:
+    return (
+        f"Build this and make it actually run: {description.strip()}\n\n"
+        f"Project name: {proj_name}\n"
+        f"Project folder (create ALL files here with file_controller create_file, using "
+        f"absolute paths): {project_dir}\n\n"
+        "Decide the simplest solid stack, write complete real code for every file, then use "
+        f"dev_run (project_dir={project_dir}) to install dependencies and run it. Read the real "
+        "output; if it errors, rewrite the file and run again until it runs cleanly. For a static "
+        "website just create the files. When it works, reply with what you built and the exact "
+        "command to run it."
     )
 
-    features = plan.get("features") or []
-    feat_lines = "\n".join(f"- {f}" for f in features)
-    stack = ", ".join(session.get("stack") or []) or "TBD"
 
-    readme = f"""# {session.get("project_name", "Project")}
-
-**Kind:** {session.get("project_kind", "software project")}
-
-## Your idea
-{session.get("description", "")}
-
-## Research summary (ARIA)
-{session.get("research_summary", "")}
-
-## Stack
-{stack}
-
-## Architecture
-{session.get("architecture", "")}
-
-## v1 features
-{feat_lines or "- See VSCODE_AI_PROMPT.md"}
-
-## Next step
-ARIA opens your editor and **starts the AI build** with the master prompt in `{PROMPT_FILENAME}`.
-When generation finishes, run: `{plan.get("run_command", "see README after build")}`
-
----
-Planned by ARIA — implementation delegated to your editor AI.
-"""
-    (project_dir / "README.md").write_text(readme, encoding="utf-8")
-
-    if vscode_prompt:
-        (project_dir / PROMPT_FILENAME).write_text(vscode_prompt, encoding="utf-8")
-
-    start = f"""# Start here
-
-ARIA researched this project and **started the editor AI build** using `{PROMPT_FILENAME}`.
-
-If the chat panel is open, the agent should already be generating code in this folder.
-Otherwise open Composer (Cmd+I) or Copilot Chat — the prompt is on your clipboard.
-
-**Folder:** `{project_dir}`
-"""
-    (project_dir / START_HERE).write_text(start, encoding="utf-8")
-
-    for rel in (plan.get("suggested_files") or []):
-        if not rel or rel.endswith((".md", ".txt", ".json")):
-            continue
-        p = project_dir / rel
-        if not p.suffix:
-            continue
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if not p.exists():
-            p.write_text("", encoding="utf-8")
-
-    _log(f"Scaffolded {project_dir} (AI handoff)", player)
-
-
-def _finalize_brief(session: dict, player=None, speak=None) -> tuple[dict, str]:
-    _log("Researching stack and drafting VS Code AI prompt…", player)
-    if player:
-        player.write_activity("Drafting your VS Code build prompt…")
-
-    brief_data = synthesize_brief(session, memory_hint=_memory_hint())
-
-    missing = brief_data.get("missing_critical") or []
-    follow_up = brief_data.get("follow_up_questions") or []
-    if missing and follow_up:
-        return session, ps.needs_input(
-            "I need one more detail before I can prepare the handoff.",
-            follow_up[:3],
-        )
-
-    session = ps.apply_brief(session, brief_data)
-    kind = session.get("project_kind", "project")
-    stack = ", ".join(session.get("stack") or []) or session.get("language", "")
-    spoken = (session.get("user_brief") or "")[:200]
-    msg = (
-        f"I researched '{session.get('project_name')}' — a {kind}. "
-        f"Recommended stack: {stack}. "
-        f"I'll open your editor and **start the AI build** with a detailed prompt — "
-        f"faster than coding from scratch. {spoken}"
-    )
-    if speak:
-        speak(
-            f"I'll open {session.get('project_name', 'your project')} in the editor "
-            "and start the AI agent on your build prompt."
-        )
-    return session, ps.needs_confirm_build(msg)
+def _stream_step(step, player) -> None:
+    """Map an autonomous step to a friendly chat line so the build is watchable."""
+    if not player:
+        return
+    tool = step.tool
+    args = step.args or {}
+    msg = None
+    if tool == "file_controller":
+        if str(args.get("action", "")).startswith(("create_file", "write")):
+            target = args.get("name") or args.get("path") or "file"
+            msg = f"📝 wrote {Path(str(target)).name}"
+    elif tool == "dev_run":
+        cmd = (args.get("command") or "").strip()
+        msg = f"▶️ {cmd}" if cmd else "▶️ running"
+    elif tool == "web_search":
+        q = (args.get("query") or "").strip()
+        msg = f"🔎 researching {q[:40]}" if q else "🔎 researching"
+    elif tool == "code_helper":
+        msg = "⚙️ running code"
+    if msg:
+        try:
+            player.write_log(f"[build] {msg}")
+        except Exception:
+            pass
 
 
 def _start(description: str, project_name: str, player=None, speak=None) -> str:
     if not description.strip():
         return "Please describe what you want to build."
+    proj_name = _safe_name(project_name or _derive_name(description))
+    project_dir = PROJECTS_DIR / proj_name
 
     ps.clear_session()
+    ps.save_session({
+        "session_id": uuid.uuid4().hex[:12],
+        "description": description.strip(),
+        "project_name": proj_name,
+        "phase": "await_build",
+    })
 
-    _log(f"Deep research: {description}", player)
-    if player:
-        player.write_activity("Researching the best way to build this…")
-
-    research = research_project(description, memory_hint=_memory_hint())
-    session = ps.start_session(description, research, project_name=project_name)
-
-    intro = research.get("intro_message") or research.get("research_summary", "")
-    questions = session.get("questions") or []
-
-    if questions:
-        return ps.needs_input(intro, questions)
-
-    _log("Enough detail — preparing VS Code handoff.", player)
-    session, _ = _finalize_brief(session, player, speak=None)
-    return _build({"confirm": True}, player, speak)
+    if speak:
+        speak(f"I can build {proj_name.replace('_', ' ')} myself. Want me to start?")
+    return ps.needs_confirm_build(
+        f"I'll build '{description.strip()}' at {project_dir} on my own — write the code, then "
+        "install and run it to test, fixing errors as I go."
+    )
 
 
-def _answer(user_input: str, player=None, speak=None) -> str:
-    session = ps.load_session()
-    if not session or session.get("phase") not in ("gathering", "ready"):
-        return "No active project. Call project_builder with action=start first."
-
-    if not user_input.strip():
-        qs = session.get("questions") or ["What else should I know?"]
-        return ps.needs_input("I didn't catch that.", qs[:3])
-
-    session = ps.merge_answers(session, user_input)
-    _, confirm = _finalize_brief(session, player, speak)
-    return confirm
-
-
-def _build(params: dict, player=None, speak=None) -> str:
+def _build(params: dict, player=None, speak=None, ctx=None) -> str:
     proceed, cancelled, err = ps.consume_build_confirm(params)
     if cancelled:
         return err or ps.cancel_message()
     if not proceed:
-        session = ps.load_session()
-        if not session or session.get("phase") != "ready":
-            return "Nothing ready yet. Use action=start first."
-        return ps.needs_confirm_build("Ready when you are.")
+        return ps.needs_confirm_build("Want me to build it now?")
 
     session = ps.load_session()
-    if not session:
-        return "Session expired. Start again with action=start."
-
-    proj_name = _safe_name(session.get("project_name", "new_project"))
-    project_dir = PROJECTS_DIR / proj_name
-    vscode_prompt = (session.get("vscode_prompt") or "").strip()
-
-    if not vscode_prompt:
-        brief_data = synthesize_brief(session, memory_hint=_memory_hint())
-        session = ps.apply_brief(session, brief_data)
-        vscode_prompt = session.get("vscode_prompt", "")
-
-    _log(f"Starting editor AI build at {project_dir}", player)
-    if speak:
-        speak(
-            f"Opening {proj_name.replace('_', ' ')} and starting the editor AI on your build prompt."
-        )
-
-    _scaffold_folder(project_dir, session, player)
-
-    from actions.editor_ai_launch import launch_editor_ai_build
-    from actions.editor_open import open_project_folder, open_prompt_in_editor
-
-    opened, editor_id = open_project_folder(project_dir)
-    time.sleep(2.0 if opened else 0.5)
-
-    launch = launch_editor_ai_build(
-        project_dir,
-        vscode_prompt,
-        editor=editor_id or "auto",
-    )
-
-    if not launch.get("ok"):
-        open_prompt_in_editor(project_dir, PROMPT_FILENAME)
-
-    session["phase"] = "handoff"
-    ps.save_session(session)
-
-    if launch.get("ok"):
-        ai_note = launch.get("detail", "Editor AI build started.")
+    if session:
+        desc = session.get("description", "")
+        proj_name = _safe_name(session.get("project_name", "new_project"))
     else:
-        ai_note = (
-            "Could not auto-start the editor AI — open Copilot or Composer; "
-            "the prompt is on your clipboard."
-        )
+        # Model jumped straight to build — accept an inline description.
+        desc = (params.get("description") or "").strip()
+        if not desc:
+            return "Nothing to build yet. Use action=start with a description first."
+        proj_name = _safe_name(params.get("project_name") or _derive_name(desc))
 
-    result = (
-        f"Done. I researched '{proj_name}' and set up the project at {project_dir}. "
-        f"{ai_note} "
-        f"Watch the editor — it should be writing your app now. "
-        f"When finished, run: {session.get('plan', {}).get('run_command', 'see README')}."
-    )
+    project_dir = PROJECTS_DIR / proj_name
+    project_dir.mkdir(parents=True, exist_ok=True)
 
+    if speak:
+        speak(f"Building {proj_name.replace('_', ' ')} now. I'll write and test it myself.")
+    _log(f"Autonomous build: {desc} -> {project_dir}", player)
     if player:
-        player.write_log(f"Aria: {result[:500]}")
+        try:
+            player.write_log(
+                f"Aria: Building {proj_name.replace('_', ' ')} — I'll write, run, and fix it myself."
+            )
+        except Exception:
+            pass
+
+    goal = _build_goal(desc, proj_name, project_dir)
+    if ctx is None:
+        from hybrid.types import ExecutionContext
+        ctx = ExecutionContext(ui=player, speak=speak)
+
+    answer, stalled = "", False
+    try:
+        from core.agent_loop import run_build
+
+        result = run_build(goal, ctx, on_step=lambda s: _stream_step(s, player))
+        answer = (result.answer or "").strip()
+        stalled = result.stopped_reason in ("max_steps", "loop_guard") or not answer
+    except Exception as e:
+        _log(f"autonomous build error: {e}", player)
+        stalled = True
+
+    if stalled:
+        if player:
+            try:
+                player.write_log("Aria: Letting my built-in builder finish this up…")
+            except Exception:
+                pass
+        try:
+            from actions.dev_agent import _build_project
+
+            answer = _build_project(desc, "python", proj_name, 30, speak, player)
+        except Exception as e:
+            answer = answer or f"I set up {project_dir} but couldn't finish the build automatically ({e})."
 
     ps.clear_session()
-    return result
+    final = answer or f"Project set up at {project_dir}."
+    if player:
+        try:
+            player.write_log(f"Aria: {final[:500]}")
+        except Exception:
+            pass
+    return final
 
 
 def project_builder(
@@ -251,11 +181,11 @@ def project_builder(
     player=None,
     session_memory=None,
     speak=None,
+    ctx=None,
 ) -> str:
     p = parameters or {}
     action = (p.get("action") or "start").lower().strip()
     description = (p.get("description") or "").strip()
-    user_input = (p.get("user_input") or p.get("answers") or "").strip()
     project_name = (p.get("project_name") or "").strip()
 
     if action == "cancel" or p.get("cancel"):
@@ -267,16 +197,12 @@ def project_builder(
             return "No active project session."
         return (
             f"Active: {session.get('description')} | "
-            f"kind={session.get('project_kind')} | "
-            f"phase={session.get('phase')} | "
             f"name={session.get('project_name')} | "
-            f"mode=vscode_ai_handoff"
+            f"phase={session.get('phase')} | mode=autonomous_build"
         )
 
-    if action == "answer":
-        return _answer(user_input, player, speak)
-
     if action == "build":
-        return _build(p, player, speak)
+        return _build(p, player, speak, ctx)
 
+    # "start" (or anything else) → confirm, then build
     return _start(description, project_name, player, speak)
