@@ -477,19 +477,17 @@ TOOL_DECLARATIONS = [
             "ARIA writes the real code itself, then installs dependencies and runs it to test, "
             "fixing its own errors until it works (it does NOT hand off to VS Code/Copilot). "
             "ALWAYS use when the user says build/create/make/start a new project. "
-            "Flow: action=start (ARIA replies NEEDS_CONFIRM, since it will run & install) → on the "
-            "user's yes, action=build confirm=true to do the whole autonomous build."
+            "Call it once with action=start and the description — it builds immediately, "
+            "no confirmation needed."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":       {"type": "STRING", "description": "start | build | status | cancel"},
-                "description":  {"type": "STRING", "description": "What to build (required for start)"},
+                "action":       {"type": "STRING", "description": "start (build it) | status | cancel"},
+                "description":  {"type": "STRING", "description": "What to build (required)"},
                 "project_name": {"type": "STRING", "description": "Optional folder name"},
-                "confirm":      {"type": "BOOLEAN", "description": "true after the user approves, with action=build"},
-                "cancel":       {"type": "BOOLEAN", "description": "true to cancel the session"},
             },
-            "required": ["action"]
+            "required": ["action", "description"]
         }
     },
     {
