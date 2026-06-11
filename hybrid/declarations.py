@@ -473,21 +473,20 @@ TOOL_DECLARATIONS = [
     {
         "name": "project_builder",
         "description": (
-            "Smart project planner for ANY new software — games, websites, apps, APIs, CLI tools. "
-            "ARIA does deep research (stack, architecture, pitfalls), asks only essential questions, "
-            "then opens VS Code or Cursor, injects a master prompt into Copilot/Composer, and starts the build — "
-            "ARIA does NOT generate the full codebase itself. "
-            "ALWAYS use when user says build/create/make/start a new project. "
-            "Flow: action=start → action=answer if NEEDS_INPUT → action=build confirm=true to open VS Code."
+            "Autonomously BUILDS any new software — games, websites, apps, APIs, CLI tools. "
+            "ARIA writes the real code itself, then installs dependencies and runs it to test, "
+            "fixing its own errors until it works (it does NOT hand off to VS Code/Copilot). "
+            "ALWAYS use when the user says build/create/make/start a new project. "
+            "Flow: action=start (ARIA replies NEEDS_CONFIRM, since it will run & install) → on the "
+            "user's yes, action=build confirm=true to do the whole autonomous build."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":       {"type": "STRING", "description": "start | answer | build | status | cancel"},
+                "action":       {"type": "STRING", "description": "start | build | status | cancel"},
                 "description":  {"type": "STRING", "description": "What to build (required for start)"},
-                "user_input":   {"type": "STRING", "description": "User's answers when action=answer"},
                 "project_name": {"type": "STRING", "description": "Optional folder name"},
-                "confirm":      {"type": "BOOLEAN", "description": "true to open VS Code with AI build prompt after action=build"},
+                "confirm":      {"type": "BOOLEAN", "description": "true after the user approves, with action=build"},
                 "cancel":       {"type": "BOOLEAN", "description": "true to cancel the session"},
             },
             "required": ["action"]

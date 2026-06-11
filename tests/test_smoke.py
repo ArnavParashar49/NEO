@@ -197,6 +197,75 @@ def test_agent_loop_respects_step_budget():
 
 
 # --------------------------------------------------------------------------- #
+# 4. Autonomous project builder — scoped tools, sandbox guard, confirm gate.   #
+# --------------------------------------------------------------------------- #
+
+def test_build_registry_is_scoped():
+    """The build loop sees exactly the curated build tools — and dev_run is NOT
+    exposed to the always-on global toolset."""
+    from hybrid.bootstrap import register_all_tools
+    from core.agent_loop import build_registry
+
+    global_reg = register_all_tools()
+    assert set(build_registry().names()) == {
+        "file_controller", "web_search", "code_helper", "dev_run",
+    }
+    assert global_reg.lookup("dev_run") is None  # command runner stays scoped
+
+
+def test_dev_run_refuses_outside_sandbox():
+    from actions.dev_run import dev_run
+    assert "refused" in dev_run({"command": "echo hi", "project_dir": "/etc"}).lower()
+
+
+def test_project_builder_start_needs_confirm():
+    from actions import project_session as ps
+    from actions.project_builder import project_builder
+
+    ps.clear_session()
+    try:
+        out = project_builder({"action": "start", "description": "a snake game in python"})
+    finally:
+        ps.clear_session()
+    assert out.startswith("NEEDS_CONFIRM")
+
+
+def test_project_builder_build_runs_autonomous_loop():
+    """action=build confirm=true drives run_build (the autonomous loop) and
+    returns its answer — verified with a fake loop, no network."""
+    import tempfile
+    from pathlib import Path
+
+    import core.agent_loop as al
+    from actions import project_builder as pb
+    from actions import project_session as ps
+    from core.agent_loop import AgentResult
+
+    seen: dict = {}
+
+    def fake_run_build(goal, ctx=None, *, on_step=None, max_steps=40):
+        seen["goal"] = goal
+        return AgentResult(
+            answer="Built the snake game. Run: python main.py",
+            steps=[], stopped_reason="done",
+        )
+
+    orig_run_build, orig_projects = al.run_build, pb.PROJECTS_DIR
+    try:
+        al.run_build = fake_run_build
+        pb.PROJECTS_DIR = Path(tempfile.mkdtemp())
+        ps.clear_session()
+        pb.project_builder({"action": "start", "description": "snake game in python"})
+        out = pb.project_builder({"action": "build", "confirm": True})
+    finally:
+        al.run_build, pb.PROJECTS_DIR = orig_run_build, orig_projects
+        ps.clear_session()
+
+    assert "snake" in seen.get("goal", "").lower()
+    assert "Built the snake game" in out
+
+
+# --------------------------------------------------------------------------- #
 # Runner                                                                       #
 # --------------------------------------------------------------------------- #
 

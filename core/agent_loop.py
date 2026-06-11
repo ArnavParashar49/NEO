@@ -28,6 +28,7 @@ from hybrid.types import ExecutionContext
 
 DEFAULT_AGENT_MODEL = "gemini-2.5-flash"
 DEFAULT_MAX_STEPS = 12
+BUILD_MAX_STEPS = 40  # building a real multi-file project needs a bigger budget
 
 # Tool results that must halt the loop and hand control back to the human.
 _STOP_PREFIXES = ("NEEDS_CONFIRM", "NEEDS_USER")
@@ -49,6 +50,30 @@ Principles:
   stop and let the user decide.
 - If you are missing information only the user can provide, ask one concise question
   instead of guessing.
+"""
+
+
+BUILD_SYSTEM_PROMPT = """You are ARIA's autonomous software builder.
+
+You are given a goal (a project to build) and a project folder. Build a REAL, WORKING
+project on your own — decide each step from real results.
+
+How to work:
+- Pick the simplest solid stack for the goal. Use web_search only if you genuinely
+  need to check an API or approach.
+- Write every source file with file_controller (action="create_file", an absolute
+  path inside the given project folder, and the FULL real code in "content"). Write
+  complete, runnable code — never placeholders or TODOs.
+- After writing, INSTALL dependencies and RUN the project with dev_run (pass the
+  project_dir). Read the real stdout/stderr it returns.
+- If running fails, read the actual error, rewrite the offending file with
+  file_controller, and run again. Repeat until it runs cleanly.
+- For a static website, you don't need to run it — just create the files.
+- Stay inside the given project folder. Do not touch unrelated files.
+
+When the project runs cleanly (or is complete for a static site), STOP and reply with
+a short summary of what you built and the exact command to run it. Do not keep going
+once it works.
 """
 
 
@@ -214,3 +239,71 @@ class GeminiToolSession:
             model=self._model, contents=self._contents, config=self._config(with_tools=False)
         )
         return (resp.text or "Reached the action limit.").strip()
+
+
+# --------------------------------------------------------------------------- #
+# Autonomous project builder — a scoped variant of the loop                    #
+# --------------------------------------------------------------------------- #
+
+_BUILD_TOOLS = ("file_controller", "web_search", "code_helper")
+
+
+def build_registry() -> ToolRegistry:
+    """A curated registry for the build loop: write files, research, run & test.
+
+    Keeps the command runner (dev_run) OUT of the global, always-on toolset — it
+    only exists inside an explicitly-confirmed build.
+    """
+    glob = ToolRegistry.instance()
+    sub = ToolRegistry()
+    for name in _BUILD_TOOLS:
+        tool = glob.lookup(name)
+        if tool is not None:
+            sub._tools[name] = tool
+
+    from actions.dev_run import dev_run as _dev_run
+
+    sub.register(
+        name="dev_run",
+        description=(
+            "Run a shell command INSIDE the project folder to install dependencies or "
+            "run/test the app, e.g. 'pip install flask', 'python main.py', 'npm install'. "
+            "Returns the real stdout/stderr + exit code so you can read errors and fix them."
+        ),
+        parameters={
+            "type": "OBJECT",
+            "properties": {
+                "command": {"type": "STRING", "description": "Command, e.g. 'python main.py' or 'pip install flask'"},
+                "project_dir": {"type": "STRING", "description": "Absolute path to the project folder"},
+                "timeout": {"type": "INTEGER", "description": "Max seconds (default 60)"},
+            },
+            "required": ["command", "project_dir"],
+        },
+        handler=lambda args, ctx: _dev_run(parameters=args, player=getattr(ctx, "ui", None)),
+        category="dev",
+        agent="system",
+    )
+    return sub
+
+
+def run_build(
+    goal: str,
+    ctx: ExecutionContext | None = None,
+    *,
+    on_step: Callable[[Step], None] | None = None,
+    max_steps: int = BUILD_MAX_STEPS,
+) -> AgentResult:
+    """Run the autonomous build loop with the build prompt + curated tools."""
+    registry = build_registry()
+    session = GeminiToolSession(
+        goal,
+        system=BUILD_SYSTEM_PROMPT,
+        tools=registry.to_gemini_declarations(),
+    )
+    return run_agent(
+        goal, ctx,
+        registry=registry,
+        session=session,
+        max_steps=max_steps,
+        on_step=on_step,
+    )

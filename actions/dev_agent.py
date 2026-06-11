@@ -362,6 +362,41 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     except Exception as e:
         return f"Run error: {e}"
 
+def run_command_in(command: str, project_dir: Path, timeout: int = 60) -> str:
+    """Run an arbitrary build/run/install command inside project_dir, return real
+    stdout/stderr + exit code. Reused by the autonomous build loop (dev_run)."""
+    parts = (command or "").split()
+    if not parts:
+        return "No command given."
+    head = parts[0].lower()
+    if head in ("python", "python3"):
+        parts[0] = sys.executable
+    elif head in ("pip", "pip3"):
+        parts = [sys.executable, "-m", "pip"] + parts[1:]
+    try:
+        result = subprocess.run(
+            parts,
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=timeout, cwd=str(project_dir),
+        )
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        segs = []
+        if out:
+            segs.append(f"STDOUT:\n{out[:4000]}")
+        if err:
+            segs.append(f"STDERR:\n{err[:4000]}")
+        tail = f"(exit code {result.returncode})"
+        return ("\n\n".join(segs) + f"\n{tail}") if segs else f"Ran with no output. {tail}"
+    except subprocess.TimeoutExpired:
+        return f"Timed out after {timeout}s — a long-running app (server/GUI) is likely working."
+    except FileNotFoundError as e:
+        return f"Command not found: {e}"
+    except Exception as e:
+        return f"Run error: {e}"
+
+
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
     """ModuleNotFoundError varsa eksik paketi otomatik kurmaya çalışır."""
     pattern = re.compile(
