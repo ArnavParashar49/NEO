@@ -41,6 +41,7 @@ def _config(
     system: str | None,
     temperature: float | None,
     json_mode: bool,
+    thinking_budget: int | None = None,
 ) -> types.GenerateContentConfig | None:
     kwargs: dict[str, Any] = {}
     if system:
@@ -49,6 +50,10 @@ def _config(
         kwargs["temperature"] = temperature
     if json_mode:
         kwargs["response_mime_type"] = "application/json"
+    if thinking_budget is not None:
+        # Free-tier 2.5 models reason far better with thinking on; -1 lets the
+        # model size its own budget, a positive int caps it.
+        kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
     return types.GenerateContentConfig(**kwargs) if kwargs else None
 
 
@@ -60,11 +65,13 @@ def ask(
     temperature: float | None = None,
     images: Sequence[Any] | None = None,
     json_mode: bool = False,
+    thinking_budget: int | None = None,
 ) -> str:
     """Generate text. Returns the response text (stripped), or "" if empty.
 
     ``prompt`` may be a string or a list of parts (e.g. strings + PIL images).
     ``images`` is a convenience: appended to the prompt as additional parts.
+    ``thinking_budget`` enables Gemini 2.5 "thinking" (-1 = dynamic, N = token cap).
     """
     if isinstance(prompt, str):
         contents: list[Any] = [prompt]
@@ -76,7 +83,12 @@ def ask(
     resp = _client().models.generate_content(
         model=model,
         contents=contents if len(contents) > 1 else contents[0],
-        config=_config(system=system, temperature=temperature, json_mode=json_mode),
+        config=_config(
+            system=system,
+            temperature=temperature,
+            json_mode=json_mode,
+            thinking_budget=thinking_budget,
+        ),
     )
     return (resp.text or "").strip()
 

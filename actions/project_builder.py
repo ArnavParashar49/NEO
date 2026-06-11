@@ -103,11 +103,26 @@ def _build_now(description: str, project_name: str, player=None, speak=None, ctx
         from hybrid.types import ExecutionContext
         ctx = ExecutionContext(ui=player, speak=speak)
 
+    def _stream_plan(plan: str) -> None:
+        if not player or not plan:
+            return
+        try:
+            player.write_log("[build] 🧭 Plan:")
+            for line in plan.splitlines():
+                if line.strip():
+                    player.write_log(f"[build]   {line.rstrip()}")
+        except Exception:
+            pass
+
     answer, stalled = "", False
     try:
         from core.agent_loop import run_build
 
-        result = run_build(goal, ctx, on_step=lambda s: _stream_step(s, player))
+        result = run_build(
+            goal, ctx,
+            on_step=lambda s: _stream_step(s, player),
+            on_plan=_stream_plan,
+        )
         answer = (result.answer or "").strip()
         stalled = result.stopped_reason in ("max_steps", "loop_guard") or not answer
     except Exception as e:

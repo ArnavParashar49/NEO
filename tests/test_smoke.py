@@ -236,7 +236,7 @@ def test_project_builder_start_builds_immediately():
 
     seen: dict = {}
 
-    def fake_run_build(goal, ctx=None, *, on_step=None, max_steps=40):
+    def fake_run_build(goal, ctx=None, *, on_step=None, on_plan=None, max_steps=40):
         seen["goal"] = goal
         return AgentResult(
             answer="Built the snake game. Run: python main.py",
