@@ -37,3 +37,4 @@ check_untyped_defs = false
 warn_unused_ignores = false
 warn_return_any = false
 exclude = "(^\\.venv/|^models/|^assets/)"
+
