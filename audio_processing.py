@@ -52,3 +52,4 @@ class NoiseGate:
             return np.zeros(samples.shape, dtype=np.int16).tobytes()
 
         return (samples.astype(np.float32) * self._atten).astype(np.int16).tobytes()
+

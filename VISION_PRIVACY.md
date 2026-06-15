@@ -29,3 +29,4 @@
 ## Removing face data
 
 Delete folders under `memory/face_db/` and edit `memory/face_registry.json`, or remove the file to clear all remembered people.
+
