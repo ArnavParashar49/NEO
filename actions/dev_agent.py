@@ -13,7 +13,6 @@ def get_base_dir():
 
 
 BASE_DIR         = get_base_dir()
-API_CONFIG_PATH  = BASE_DIR / "config" / "api_keys.json"
 PROJECTS_DIR     = Path.home() / "Desktop" / "AriaProjects"
 MAX_FIX_ATTEMPTS = 5
 MODEL_PLANNER    = "gemini-2.5-flash"
@@ -294,21 +293,9 @@ def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
     if not to_install:
         return f"All dependencies already installed: {', '.join(dependencies)}"
 
-    print(f"[DevAgent] 📦 Installing: {to_install}")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install"] + to_install,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=120, cwd=str(project_dir)
-        )
-        if result.returncode == 0:
-            return f"Installed: {', '.join(to_install)}"
-        return f"Install warning (non-fatal): {result.stderr[:200]}"
-    except subprocess.TimeoutExpired:
-        return "Dependency install timed out (non-fatal)."
-    except Exception as e:
-        return f"Install error (non-fatal): {e}"
+    print(f"[DevAgent Sandbox] 📦 Installing: {to_install}")
+    install_cmd = "pip install " + " ".join(to_install)
+    return run_command_in(install_cmd, project_dir, timeout=120)
 
 def _open_vscode(project_dir: Path) -> bool:
     from actions.editor_open import open_project_folder
@@ -330,55 +317,32 @@ def _reveal_project(project_dir: Path, entry_point: str, run_command: str) -> No
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     if not run_command or str(run_command).lower() in ("none", "n/a"):
         return "Static project — no run step."
-    print(f"[DevAgent] 🚀 Running: {run_command}")
-    try:
-        parts = run_command.split()
-        if parts[0].lower() == "python":
-            parts[0] = sys.executable
+    return run_command_in(run_command, project_dir, timeout)
 
+def run_command_in(command: str, project_dir: Path, timeout: int = 60) -> str:
+    """Run an arbitrary build/run/install command inside project_dir securely via Docker,
+    return real stdout/stderr + exit code."""
+    if not command:
+        return "No command given."
+        
+    print(f"[DevAgent Sandbox] Running: {command} in {project_dir}")
+    
+    # We mount the project dir into /workspace in the container
+    docker_cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{project_dir.resolve()}:/workspace",
+        "-w", "/workspace",
+        # Provide a default image that has Python; this could be expanded
+        "python:3.12-slim",
+        "bash", "-c", command
+    ]
+    
+    try:
         result = subprocess.run(
-            parts,
+            docker_cmd,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=timeout,
-            cwd=str(project_dir)
-        )
-
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-
-        combined_parts = []
-        if stdout:
-            combined_parts.append(f"STDOUT:\n{stdout}")
-        if stderr:
-            combined_parts.append(f"STDERR:\n{stderr}")
-
-        return "\n\n".join(combined_parts) if combined_parts else "Ran with no output."
-
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s — long-running app (server/GUI) is likely working."
-    except FileNotFoundError as e:
-        return f"Command not found: {e}"
-    except Exception as e:
-        return f"Run error: {e}"
-
-def run_command_in(command: str, project_dir: Path, timeout: int = 60) -> str:
-    """Run an arbitrary build/run/install command inside project_dir, return real
-    stdout/stderr + exit code. Reused by the autonomous build loop (dev_run)."""
-    parts = (command or "").split()
-    if not parts:
-        return "No command given."
-    head = parts[0].lower()
-    if head in ("python", "python3"):
-        parts[0] = sys.executable
-    elif head in ("pip", "pip3"):
-        parts = [sys.executable, "-m", "pip"] + parts[1:]
-    try:
-        result = subprocess.run(
-            parts,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=str(project_dir),
         )
         out = (result.stdout or "").strip()
         err = (result.stderr or "").strip()
@@ -392,9 +356,9 @@ def run_command_in(command: str, project_dir: Path, timeout: int = 60) -> str:
     except subprocess.TimeoutExpired:
         return f"Timed out after {timeout}s — a long-running app (server/GUI) is likely working."
     except FileNotFoundError as e:
-        return f"Command not found: {e}"
+        return f"Docker command not found. Is Docker installed and running? {e}"
     except Exception as e:
-        return f"Run error: {e}"
+        return f"Sandbox run error: {e}"
 
 
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:

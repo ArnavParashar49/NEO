@@ -165,9 +165,19 @@ def run_agent(
     registry = registry or ToolRegistry.instance()
     ctx = ctx or ExecutionContext()
     if session is None:
+        try:
+            from core.memory_rag import format_memory_for_prompt
+            memory_context = format_memory_for_prompt(goal)
+        except ImportError:
+            memory_context = ""
+            
+        full_system = AGENT_SYSTEM_PROMPT
+        if memory_context:
+            full_system += f"\n\n{memory_context}"
+
         session = GeminiToolSession(
             goal,
-            system=AGENT_SYSTEM_PROMPT,
+            system=full_system,
             tools=registry.to_gemini_declarations(),
         )
 
@@ -218,7 +228,7 @@ def run_agent(
 # --------------------------------------------------------------------------- #
 
 class GeminiToolSession:
-    """A stateful function-calling conversation against google.genai."""
+    """A stateful function-calling conversation against litellm."""
 
     def __init__(
         self,
@@ -230,68 +240,78 @@ class GeminiToolSession:
         temperature: float | None = None,
         thinking_budget: int | None = None,
     ) -> None:
-        from google.genai import types
-
-        from core.llm import _client
-
-        self._types = types
-        self._client = _client()
         self._model = model
-        self._system = system
         self._temperature = temperature
         self._thinking_budget = thinking_budget
-        self._tools = [types.Tool(function_declarations=tools)] if tools else None
-        self._contents: list[Any] = [
-            types.Content(role="user", parts=[types.Part.from_text(text=goal)])
-        ]
-
-    def _config(self, *, with_tools: bool = True):
-        thinking = (
-            self._types.ThinkingConfig(thinking_budget=self._thinking_budget)
-            if self._thinking_budget is not None
-            else None
-        )
-        return self._types.GenerateContentConfig(
-            system_instruction=self._system,
-            temperature=self._temperature,
-            tools=self._tools if with_tools else None,
-            thinking_config=thinking,
-        )
+        
+        # Tools in litellm format (OpenAI format)
+        self._tools = [{"type": "function", "function": t} for t in tools] if tools else None
+        
+        self._messages: list[dict] = []
+        if system:
+            self._messages.append({"role": "system", "content": system})
+        self._messages.append({"role": "user", "content": goal})
 
     def _generate(self, *, with_tools: bool = True):
-        """generate_content with light backoff on transient free-tier limits.
-
-        Free Gemini keys hit per-minute 429s and 503 "high demand" spikes often;
-        without this a single blip aborts the whole build. Daily-quota 429s won't
-        recover in three tries and still propagate (so the caller can fall back).
-        """
         import time
+        import litellm
+        from core.llm import _get_api_key_for_model
+        
+        kwargs = {
+            "model": self._model,
+            "messages": self._messages,
+        }
+        
+        # litellm expects gemini models to have gemini/ prefix
+        if kwargs["model"].startswith("gemini-"):
+            kwargs["model"] = f"gemini/{kwargs['model']}"
+            
+        api_key = _get_api_key_for_model(kwargs["model"])
+        if api_key:
+            kwargs["api_key"] = api_key
+            
+        if with_tools and self._tools:
+            kwargs["tools"] = self._tools
+            
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
 
         last: Exception | None = None
         for attempt in range(3):
             try:
-                return self._client.models.generate_content(
-                    model=self._model,
-                    contents=self._contents,
-                    config=self._config(with_tools=with_tools),
-                )
-            except Exception as e:  # noqa: BLE001 — narrow by message below
+                return litellm.completion(**kwargs)
+            except Exception as e:
                 last = e
                 msg = str(e)
                 if not any(code in msg for code in ("429", "503", "500", "UNAVAILABLE")):
                     raise
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))
-        raise last  # type: ignore[misc]
+        raise last
 
     def step(self) -> Turn:
         resp = self._generate()
-        calls = list(getattr(resp, "function_calls", None) or [])
-        if calls:
-            # Record the model's turn so the following tool responses align.
-            self._contents.append(resp.candidates[0].content)
-            return Turn(calls=[(fc.name, dict(fc.args or {})) for fc in calls])
-        return Turn(text=resp.text or "")
+        msg = resp.choices[0].message
+        
+        # litellm returns message dict-like object
+        calls = []
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            import json
+            for tc in msg.tool_calls:
+                args = {}
+                if hasattr(tc.function, "arguments"):
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except Exception:
+                        if isinstance(tc.function.arguments, dict):
+                            args = tc.function.arguments
+                calls.append((tc.function.name, args))
+                
+            self._messages.append(msg.model_dump())
+            return Turn(calls=calls)
+            
+        self._messages.append(msg.model_dump())
+        return Turn(text=msg.content or "")
 
     def add_tool_result(self, name: str, result: str) -> None:
         text = result or ""
@@ -299,21 +319,35 @@ class GeminiToolSession:
             head = text[: _MAX_RESULT_CHARS // 2]
             tail = text[-_MAX_RESULT_CHARS // 2 :]
             text = f"{head}\n…[{len(result) - _MAX_RESULT_CHARS} chars trimmed]…\n{tail}"
-        part = self._types.Part.from_function_response(name=name, response={"result": text})
-        self._contents.append(self._types.Content(role="user", parts=[part]))
+            
+        # Find the tool_call_id for this name from the last assistant message
+        tool_call_id = "unknown"
+        for m in reversed(self._messages):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                for tc in m.get("tool_calls"):
+                    func = tc.get("function") if isinstance(tc, dict) else getattr(tc, "function", None)
+                    func_name = func.get("name") if isinstance(func, dict) else getattr(func, "name", None)
+                    if func_name == name:
+                        tool_call_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "unknown")
+                        break
+                if tool_call_id != "unknown":
+                    break
+                    
+        import json
+        self._messages.append({
+            "role": "tool",
+            "tool_call_id": str(tool_call_id),
+            "name": name,
+            "content": json.dumps({"result": text})
+        })
 
     def finalize(self) -> str:
-        self._contents.append(
-            self._types.Content(
-                role="user",
-                parts=[self._types.Part.from_text(
-                    text="You've hit the action limit. In one or two sentences, summarize "
-                         "what you accomplished and what (if anything) remains."
-                )],
-            )
-        )
+        self._messages.append({
+            "role": "user",
+            "content": "You've hit the action limit. In one or two sentences, summarize what you accomplished and what (if anything) remains."
+        })
         resp = self._generate(with_tools=False)
-        return (resp.text or "Reached the action limit.").strip()
+        return (resp.choices[0].message.content or "Reached the action limit.").strip()
 
 
 # --------------------------------------------------------------------------- #

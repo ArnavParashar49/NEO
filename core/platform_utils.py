@@ -21,7 +21,7 @@ IS_LINUX = not IS_MAC and not IS_WINDOWS
 
 
 def mod_key() -> str:
-    """Primary modifier for pyautogui hotkeys: Cmd on macOS, Ctrl elsewhere."""
+    """Primary modifier for hotkeys: Cmd on macOS, Ctrl elsewhere."""
     return "command" if IS_MAC else "ctrl"
 
 

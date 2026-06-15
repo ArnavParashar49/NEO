@@ -9,11 +9,7 @@ import platform
 from pathlib import Path
 from datetime import datetime
 
-try:
-    import pyautogui
-    _PYAUTOGUI = True
-except ImportError:
-    _PYAUTOGUI = False
+
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -55,8 +51,7 @@ def _build_sandbox() -> dict:
         "os_path": os.path,  
     }
 
-    if _PYAUTOGUI:
-        sandbox["pyautogui"] = pyautogui
+
 
     if _OS == "Windows":
         try:
@@ -106,9 +101,9 @@ def _ask_gemini_for_desktop_action(task: str) -> str:
     if _OS == "Windows":
         os_specific = "- ctypes (Windows API calls, read-only)\n- winreg (registry READ only)"
     elif _OS == "Darwin":
-        os_specific = "- subprocess is NOT available; use pyautogui or Path only"
+        os_specific = "- subprocess is NOT available; use Path only"
     else:
-        os_specific = "- subprocess is NOT available; use pyautogui or Path only"
+        os_specific = "- subprocess is NOT available; use Path only"
 
     prompt = f"""You are a desktop automation assistant.
 Current OS: {_OS}
@@ -116,7 +111,6 @@ Desktop path: {desktop}
 
 Generate safe Python code to accomplish the task below.
 Allowed modules ONLY:
-- pyautogui (mouse, keyboard — if needed)
 - pathlib.Path (file/folder inspection only, no deletion)
 - shutil.copy2, shutil.copytree, shutil.disk_usage (NO move, NO rmtree)
 - os_path (os.path equivalent, read-only)

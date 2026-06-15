@@ -4,7 +4,7 @@
 
 # ARIA
 
-**A real-time, voice-first AI buddy that lives in your menu bar — it hears, sees, remembers, and controls your computer.**
+**A real-time, voice-first AI companion that lives in your menu bar — hears, sees, remembers, and controls your computer.**
 
 Powered by Gemini Live · runs locally · cross-platform · zero subscriptions
 
@@ -13,17 +13,15 @@ Powered by Gemini Live · runs locally · cross-platform · zero subscriptions
 [![UI](https://img.shields.io/badge/UI-PyQt6-41CD52?logo=qt&logoColor=white)](https://pypi.org/project/PyQt6/)
 [![License](https://img.shields.io/badge/license-CC_BY--NC_4.0-lightgrey)](https://creativecommons.org/licenses/by-nc/4.0/)
 
-<img src="assets/screenshot.png" width="380" alt="ARIA chat window"/>
-
 </div>
 
 ---
 
 ## What is ARIA?
 
-ARIA is a personal AI assistant that sits in your **macOS menu bar** as a little cyan pixel-robot buddy. Click it (or just say **"Hey Aria"**) and it pops out, ready to talk. Through natural conversation it can open apps, manage files, read your screen and webcam, search the web, draft emails, build projects, and carry out multi-step goals on its own — speaking back to you in real time.
+ARIA is a personal AI assistant that sits quietly in your menu bar as a cyan pixel-robot. Simply click it or say **"Hey Aria"** to initiate a seamless, real-time voice conversation. Through natural dialogue, ARIA can manage your files, control your applications, interpret your screen and webcam, search the web, manage emails, and autonomously execute complex multi-step goals.
 
-It runs on your machine against your own free Gemini key. No cloud account, no subscription, no telemetry.
+Operating locally on your machine with your own free Gemini API key, ARIA ensures full privacy with no cloud dependencies, subscriptions, or telemetry.
 
 ---
 
@@ -36,7 +34,7 @@ It runs on your machine against your own free Gemini key. No cloud account, no s
 | 🗣️ **"Hey Aria" wake word** | Fully local wake-word + double-clap detection (Vosk) — no audio leaves your machine to listen. |
 | 👁️ **Sees your world** | Reads your screen and webcam on demand. On-device object & face detection (YOLOv8 + DeepFace). |
 | 🧠 **Persistent memory** | Remembers your projects, preferences, contacts, and people across sessions. |
-| 🛠️ **Controls your computer** | Launch apps, manage files, run commands, control the browser, adjust system settings. |
+| 🛠️ **Controls your computer** | Launch apps, manage files, run commands, control the browser, adjust system settings, generate presentations. |
 | 🧩 **Autonomous mode** | Give it a goal; it decides one action at a time, sees the real result, and keeps going until it's done. |
 | 📂 **File-aware** | Drag in PDFs, code, or images to summarize, analyze, or edit instantly. |
 | ⌨️ **Type or talk** | Seamlessly switch between the chat box and your voice. |
@@ -44,45 +42,37 @@ It runs on your machine against your own free Gemini key. No cloud account, no s
 
 ---
 
-## 🚀 Quick start
+## 🚀 Installation
 
+Run the single-line command for your platform in your terminal to automatically download, install, and start ARIA.
+
+### macOS / Linux
 ```bash
-# 1. Clone
-git clone https://github.com/ArnavParashar49/ARIA.git
-cd ARIA
-
-# 2. Create a virtual environment (keep the project OUT of ~/Downloads on macOS — see Troubleshooting)
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-
-# 3. Install
-pip install -r requirements.txt
-playwright install                  # browser automation engine
-
-# 4. Add your free Gemini API key
-cp config/api_keys.example.json config/api_keys.json
-#   then edit config/api_keys.json and paste your key from https://aistudio.google.com
-
-# 5. Run
-python main.py
+curl -sSL https://raw.githubusercontent.com/ArnavParashar49/ARIA/main/install.sh | bash
 ```
 
-On first launch ARIA downloads a small (~40 MB) local speech model for the wake word, and the vision weights (`yolov8n.pt`) if they're missing. Grant **microphone** (and **camera** / **accessibility**) permission when macOS asks.
+### Windows
+```powershell
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/ArnavParashar49/ARIA/main/install.ps1'))
+```
 
-> Then just say **"Hey Aria"**, clap twice, or click the menu-bar robot. **Double-click** the buddy to open the full chat window.
+> **Note:** On your first launch, ARIA will prompt you to enter your Gemini API key (from [aistudio.google.com](https://aistudio.google.com)). She will also download a small (~40 MB) local speech model for the wake word, and vision weights (`yolov8n.pt`) if missing. 
 
 ---
 
-## 🍎 Run it as a real menu-bar app (macOS)
+## 🗑️ Uninstallation
 
-Don't want a terminal window hanging around? Bundle ARIA into a proper `.app` that lives only in the menu bar (no Dock icon) and starts at login:
+To completely remove ARIA and her background services from your system:
 
+### macOS / Linux
 ```bash
-./scripts/build_macos_app.sh --login   # builds ARIA.app + registers it as a Login Item
-open ./ARIA.app
+curl -sSL https://raw.githubusercontent.com/ArnavParashar49/ARIA/main/uninstall.sh | bash
 ```
 
-The bundle is a thin wrapper around your local `.venv`, so it always runs the live code — no need to rebuild after pulling changes (only re-run it if you change the icon or `Info.plist`).
+### Windows
+```powershell
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/ArnavParashar49/ARIA/main/uninstall.ps1'))
+```
 
 ---
 
@@ -103,36 +93,10 @@ Everything lives in `config/api_keys.json` (gitignored — your key never leaves
 
 ---
 
-## 🧠 How it works
-
-```
-You ── voice / text ──► ARIA (Gemini Live, core/llm.py)
-                          │
-                          ▼
-              Hybrid orchestrator (hybrid/) ── routes intent
-                          │
-        ┌─────────────────┼─────────────────────┐
-        ▼                 ▼                       ▼
-   Tool actions     Autonomous loop          Vision / memory
-   (actions/)       (core/agent_loop.py)     (on-device)
-   open apps,       plan → act → observe     YOLO + DeepFace,
-   files, browser,  → repeat until done      persistent context
-   email, web…
-```
-
-- **`core/`** — the Gemini Live client, the autonomous tool-use loop, prompt, and platform helpers.
-- **`hybrid/`** — the orchestrator/router that decides whether a request is a quick tool call or a full autonomous task.
-- **`actions/`** — 35+ capability modules: file control, browser control, screen/vision, email & messaging, web search, project building, and more.
-- **`agent/`** — planner / executor / task-queue for structured multi-step jobs.
-- **`ui_*.py`** — the PyQt6 interface: the pixel buddy (`ui_buddy.py`), menu-bar tray (`ui_tray.py`), Siri-style bar (`ui_siri_bar.py`), and chat window (`ui_panel.py`).
-- **`wake_listener.py`** — local "Hey Aria" + double-clap detection (Vosk), nothing streamed to the cloud just to listen.
-
----
-
 ## 🔒 Privacy
 
-- Your API key and personal memory (`config/api_keys.json`, `memory/`) are **gitignored** and stay local.
-- Wake-word listening is **fully on-device** — audio is only sent to Gemini *after* you summon ARIA.
+- Your API key and personal memory (`config/api_keys.json`, `memory/`) are **gitignored** and stay strictly local.
+- Wake-word listening is **fully on-device** — audio is only sent to Gemini *after* you actively summon ARIA.
 - Vision runs locally (YOLOv8 + DeepFace). See **[VISION_PRIVACY.md](VISION_PRIVACY.md)** for what's processed and stored.
 
 ---
@@ -143,20 +107,20 @@ You ── voice / text ──► ARIA (Gemini Live, core/llm.py)
 |---|---|
 | **OS** | macOS 12+, Windows 10/11, or Linux |
 | **Python** | 3.11 or 3.12 |
-| **Microphone** | Required for voice |
+| **Microphone** | Required for voice interaction |
 | **Webcam** | Optional, for vision features |
 | **API key** | Free Gemini key ([aistudio.google.com](https://aistudio.google.com)) |
 
-> Some OS-specific packages aren't bundled to keep `requirements.txt` light. If you hit a `ModuleNotFoundError`, install that one package for your platform with `pip install <module>`.
+> Some OS-specific packages aren't bundled to keep `requirements.txt` light. If you encounter a `ModuleNotFoundError`, install that specific package for your platform with `pip install <module>`.
 
 ---
 
 ## 🩺 Troubleshooting
 
-- **macOS: app won't start / `Operation not permitted` reading `.venv`** — the project is in a TCC-protected folder. **Keep ARIA out of `~/Downloads`, `~/Desktop`, and `~/Documents`** (use e.g. `~/ARIA`). Those folders block a launched `.app` from reading the virtualenv.
-- **No microphone / "wake word disabled"** — grant Microphone permission in System Settings → Privacy, then relaunch. The first run also downloads the Vosk speech model.
-- **"Hey Aria" not triggering** — speak it as one phrase; double-clap also works as a fallback.
-- **`playwright` errors** — run `playwright install` once after `pip install`.
+- **macOS: `Operation not permitted` reading `.venv`** — This occurs if installed in a TCC-protected folder. **Ensure ARIA is installed outside of `~/Downloads`, `~/Desktop`, and `~/Documents`** (e.g., `~/.aria`).
+- **No microphone / "wake word disabled"** — Grant Microphone permission in your OS Settings → Privacy, then relaunch.
+- **"Hey Aria" not triggering** — Speak it naturally as one connected phrase. A double-clap serves as a reliable fallback.
+- **`playwright` errors** — Run `playwright install` manually if the automated installation failed.
 
 ---
 

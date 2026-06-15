@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import platform
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )

@@ -1,61 +1,76 @@
-"""Central Gemini access for ARIA.
+"""Central LLM access for ARIA using litellm.
 
-Every module used to repeat the same boilerplate — import the SDK, configure the
-API key, build a model, call ``generate_content``, read ``.text`` — against the
-*deprecated* ``google.generativeai`` package. This consolidates all of that into
-one place built on the current ``google.genai`` SDK:
-
-    from core.llm import ask, ask_json
-
-    text = ask("Summarize this", model="gemini-2.5-flash")
-    data = ask_json("Return JSON ...")
-    desc = ask("What is this?", images=[pil_image])
-
-A single ``Client`` is reused for the process. Callers keep passing whatever
-model string they used before, so behavior is unchanged aside from the SDK.
+This replaces the old hardcoded Gemini integration with litellm, allowing
+the user to configure any API key (OpenAI, Anthropic, Gemini, Groq, Ollama)
+by simply setting the model string (e.g. "gpt-4o", "gemini/gemini-2.5-flash", "ollama/llama3").
 """
 
 from __future__ import annotations
 
 import json as _json
 import re as _re
-from functools import lru_cache
 from typing import Any, Sequence
+from base64 import b64encode
+from io import BytesIO
 
-from google import genai
-from google.genai import types
+import litellm
 
-# Sensible default; nearly every call site passes its own model explicitly.
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+# Provide a fallback default model. Can be overridden in config later.
+DEFAULT_MODEL = "gemini/gemini-2.5-flash-lite"
 
+def _pil_to_base64(img: Any) -> str:
+    """Convert PIL image to base64 data URI."""
+    try:
+        from PIL import Image
+        if isinstance(img, Image.Image):
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG")
+            b64 = b64encode(buf.getvalue()).decode("utf-8")
+            return f"data:image/jpeg;base64,{b64}"
+    except ImportError:
+        pass
+    return ""
 
-@lru_cache(maxsize=1)
-def _client() -> genai.Client:
-    from config import get_api_key
-
-    return genai.Client(api_key=get_api_key())
-
-
-def _config(
-    *,
-    system: str | None,
-    temperature: float | None,
-    json_mode: bool,
-    thinking_budget: int | None = None,
-) -> types.GenerateContentConfig | None:
-    kwargs: dict[str, Any] = {}
+def _format_messages(prompt: str | Sequence[Any], system: str | None, images: Sequence[Any] | None) -> list[dict]:
+    messages = []
     if system:
-        kwargs["system_instruction"] = system
-    if temperature is not None:
-        kwargs["temperature"] = temperature
-    if json_mode:
-        kwargs["response_mime_type"] = "application/json"
-    if thinking_budget is not None:
-        # Free-tier 2.5 models reason far better with thinking on; -1 lets the
-        # model size its own budget, a positive int caps it.
-        kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
-    return types.GenerateContentConfig(**kwargs) if kwargs else None
+        messages.append({"role": "system", "content": system})
 
+    content_array = []
+    
+    if isinstance(prompt, str):
+        content_array.append({"type": "text", "text": prompt})
+    else:
+        for part in prompt:
+            if isinstance(part, str):
+                content_array.append({"type": "text", "text": part})
+            else:
+                b64 = _pil_to_base64(part)
+                if b64:
+                    content_array.append({"type": "image_url", "image_url": {"url": b64}})
+
+    if images:
+        for img in images:
+            b64 = _pil_to_base64(img)
+            if b64:
+                content_array.append({"type": "image_url", "image_url": {"url": b64}})
+
+    messages.append({"role": "user", "content": content_array})
+    return messages
+
+def _get_api_key_for_model(model: str) -> str | None:
+    from config import get_api_key
+    if model.startswith("gemini"):
+        return get_api_key("gemini_api_key", required=False)
+    if model.startswith("gpt") or model.startswith("openai"):
+        return get_api_key("openai_api_key", required=False)
+    if model.startswith("claude"):
+        return get_api_key("anthropic_api_key", required=False)
+    # litellm will try to look for ENV vars if api_key is None, 
+    # but we will just pass what we have from keyring.
+    return None
 
 def ask(
     prompt: str | Sequence[Any],
@@ -67,31 +82,29 @@ def ask(
     json_mode: bool = False,
     thinking_budget: int | None = None,
 ) -> str:
-    """Generate text. Returns the response text (stripped), or "" if empty.
+    """Generate text using litellm."""
+    
+    # Prefix un-prefixed gemini models to ensure litellm routes them correctly
+    if model.startswith("gemini-"):
+        model = f"gemini/{model}"
 
-    ``prompt`` may be a string or a list of parts (e.g. strings + PIL images).
-    ``images`` is a convenience: appended to the prompt as additional parts.
-    ``thinking_budget`` enables Gemini 2.5 "thinking" (-1 = dynamic, N = token cap).
-    """
-    if isinstance(prompt, str):
-        contents: list[Any] = [prompt]
-    else:
-        contents = list(prompt)
-    if images:
-        contents.extend(images)
+    messages = _format_messages(prompt, system, images)
+    kwargs = {
+        "model": model,
+        "messages": messages,
+    }
+    
+    api_key = _get_api_key_for_model(model)
+    if api_key:
+        kwargs["api_key"] = api_key
 
-    resp = _client().models.generate_content(
-        model=model,
-        contents=contents if len(contents) > 1 else contents[0],
-        config=_config(
-            system=system,
-            temperature=temperature,
-            json_mode=json_mode,
-            thinking_budget=thinking_budget,
-        ),
-    )
-    return (resp.text or "").strip()
-
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+        
+    resp = litellm.completion(**kwargs)
+    return (resp.choices[0].message.content or "").strip()
 
 def ask_json(
     prompt: str | Sequence[Any],
@@ -101,7 +114,7 @@ def ask_json(
     temperature: float | None = None,
     images: Sequence[Any] | None = None,
 ) -> Any:
-    """Like :func:`ask` but requests JSON and parses it (tolerates ``` fences)."""
+    """Like ask but requests JSON and parses it."""
     raw = ask(
         prompt,
         model=model,
@@ -111,7 +124,6 @@ def ask_json(
         json_mode=True,
     )
     return _parse_json(raw)
-
 
 def _parse_json(raw: str) -> Any:
     raw = raw.strip()

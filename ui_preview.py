@@ -7,9 +7,9 @@ without the full voice app.
 
 import sys
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
@@ -54,7 +54,7 @@ def main():
 
     # colors: the robot in every theme
     if "--colors" in sys.argv:
-        from PyQt6.QtWidgets import QGridLayout
+        from PySide6.QtWidgets import QGridLayout
         from ui_buddy import THEMES
         win = _Bg()
         win.setWindowTitle("ARIA — robot colors")
