@@ -7,9 +7,9 @@ import threading
 import time
 
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer, Signal, QObject
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 try:
     import cv2
@@ -62,7 +62,8 @@ class CameraPreviewWindow(QWidget):
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Tool,
+            | Qt.WindowType.Window
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
 
         self._video = QLabel("Starting camera…")
@@ -237,7 +238,6 @@ class CameraPreviewManager:
         status = "Live — labels (slow)" if self._yolo_live else "ARIA is looking…"
         self._window.set_status(status)
         self._window.show()
-        self._window.raise_()
         print("[CameraPreview] Live preview on")
         app.processEvents()
 
@@ -292,7 +292,6 @@ class CameraPreviewManager:
             status = "Live — labels (slow)" if self._yolo_live else "ARIA is looking…"
             self._window.set_status(status)
             self._window.show()
-            self._window.raise_()
             print("[CameraPreview] Live preview on")
 
         app.processEvents()

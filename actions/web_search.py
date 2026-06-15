@@ -13,7 +13,6 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR        = _get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:

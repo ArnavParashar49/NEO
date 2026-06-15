@@ -9,8 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote_plus
 
-import pyautogui
-import numpy as np
+
 
 try:
     import requests
@@ -34,7 +33,6 @@ def _get_base_dir() -> Path:
 
 
 BASE_DIR        = _get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 HEADERS = {
     "User-Agent": (

@@ -1,7 +1,7 @@
 """Shared UI colors and helpers."""
 import platform
 
-from PyQt6.QtGui import QColor
+from PySide6.QtGui import QColor
 
 
 class C:

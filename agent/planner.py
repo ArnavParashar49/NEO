@@ -11,7 +11,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 PLANNER_PROMPT = """You are the planning module of ARIA, a personal AI assistant.

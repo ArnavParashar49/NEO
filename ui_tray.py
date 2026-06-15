@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtGui import QColor, QCursor, QIcon, QPainter, QPixmap
-from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from ui_buddy import _BODY, _FACES, _PAL, THEMES
 

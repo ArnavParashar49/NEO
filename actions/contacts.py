@@ -8,7 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from memory.memory_manager import load_memory, update_memory
+from core.memory_rag import store_memory, retrieve_relevant_memory
 
 _OS = platform.system()
 _OSASCRIPT = "/usr/bin/osascript"
@@ -66,11 +66,6 @@ return results as string
     return None
 
 
-def _memory_contacts() -> dict:
-    mem = load_memory()
-    return mem.get("contacts", {})
-
-
 def lookup_contact(name: str) -> dict | None:
     """Return {name, email, phone, source} or None."""
     name = name.strip()
@@ -80,22 +75,14 @@ def lookup_contact(name: str) -> dict | None:
     if _EMAIL_RE.fullmatch(name):
         return {"name": name, "email": name, "phone": "", "source": "email"}
 
-    slug = _slug(name)
-    stored = _memory_contacts()
-    for key, entry in stored.items():
-        val = entry.get("value", "") if isinstance(entry, dict) else str(entry)
-        if slug in key or name.lower() in key.replace("_", " "):
-            email = _EMAIL_RE.search(val)
-            if email:
-                return {"name": name, "email": email.group(0), "phone": "", "source": "memory"}
-
-    # Partial match on display names in value
-    for key, entry in stored.items():
-        val = entry.get("value", "") if isinstance(entry, dict) else str(entry)
+    # Search RAG memory for contacts
+    memories = retrieve_relevant_memory(f"contact {name} email phone", top_k=3, category="contacts")
+    for mem in memories:
+        val = mem.get("content", "")
         if name.lower() in val.lower():
             email = _EMAIL_RE.search(val)
             if email:
-                return {"name": key.replace("_", " "), "email": email.group(0), "phone": "", "source": "memory"}
+                return {"name": name, "email": email.group(0), "phone": "", "source": "memory"}
 
     mac = _mac_contacts_search(name)
     if mac and mac.get("email"):
@@ -164,17 +151,16 @@ def contact_manager(
         if notes:
             val_parts.append(notes)
         value = " | ".join(val_parts)
-        update_memory({"contacts": {_slug(name): {"value": f"{name} — {value}"}}})
+        store_memory("contacts", f"Contact {name}: {value}")
         return f"Saved contact {name}."
 
     if action == "list":
-        stored = _memory_contacts()
-        if not stored:
+        memories = retrieve_relevant_memory("contact email phone", top_k=20, category="contacts")
+        if not memories:
             return "No contacts saved in ARIA memory yet."
         lines = []
-        for key, entry in list(stored.items())[:20]:
-            val = entry.get("value") if isinstance(entry, dict) else str(entry)
-            lines.append(f"• {val}")
+        for mem in memories:
+            lines.append(f"• {mem.get('content', '')}")
         return "Saved contacts:\n" + "\n".join(lines)
 
     return "Unknown action. Use: lookup | save | list"

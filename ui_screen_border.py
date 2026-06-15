@@ -1,10 +1,10 @@
-"""Soft red edge vignette while ARIA captures / analyzes the screen."""
+"""Soft cyan/blue edge vignette while ARIA captures / analyzes the screen."""
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt, QRect
-from PyQt6.QtGui import QColor, QLinearGradient, QPainter
-from PyQt6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QPointF, Qt, QRect
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 class ScreenBorderOverlay(QWidget):
@@ -13,14 +13,15 @@ class ScreenBorderOverlay(QWidget):
     def __init__(self, geometry: QRect, parent=None):
         super().__init__(parent)
         self._fade_depth = 80
-        self._edge_color = QColor(255, 118, 118, 115)
-        self._mid_color = QColor(255, 118, 118, 35)
-        self._clear = QColor(255, 118, 118, 0)
+        self._edge_color = QColor(0, 200, 255, 115)
+        self._mid_color = QColor(0, 200, 255, 35)
+        self._clear = QColor(0, 200, 255, 0)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
+            | Qt.WindowType.Window
+            | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.WindowType.WindowTransparentForInput
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)

@@ -10,9 +10,9 @@ from __future__ import annotations
 import math
 import random
 
-from PyQt6.QtCore import QPointF, Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter, QRadialGradient
-from PyQt6.QtWidgets import QWidget
+from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QRadialGradient
+from PySide6.QtWidgets import QWidget
 
 # --- palette ---------------------------------------------------------------
 _PAL = {

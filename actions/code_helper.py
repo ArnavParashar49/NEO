@@ -12,7 +12,6 @@ def get_base_dir():
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR           = get_base_dir()
-API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
 DESKTOP            = Path.home() / "Desktop"
 MAX_BUILD_ATTEMPTS = 3
 GEMINI_MODEL       = "gemini-2.5-flash"
@@ -86,10 +85,32 @@ def _has_error(output: str) -> bool:
 
 def _take_screenshot() -> Path | None:
     try:
-        import pyautogui
+        import platform
+        _OS = platform.system()
         screenshot_path = Path.home() / "Desktop" / f"aria_debug_{int(time.time())}.png"
-        screenshot = pyautogui.screenshot()
-        screenshot.save(str(screenshot_path))
+        
+        if _OS == "Darwin":
+            subprocess.run(["screencapture", "-x", str(screenshot_path)], check=True)
+        elif _OS == "Windows":
+            script = f"""
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $Screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $Bitmap = New-Object System.Drawing.Bitmap $Screen.Width, $Screen.Height
+            $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+            $Graphics.CopyFromScreen($Screen.X, $Screen.Y, 0, 0, $Bitmap.Size)
+            $Bitmap.Save('{screenshot_path}')
+            """
+            subprocess.run(["powershell", "-Command", script], check=True)
+        else:
+            if subprocess.run(["which", "scrot"], capture_output=True).returncode == 0:
+                subprocess.run(["scrot", str(screenshot_path)], check=True)
+            elif subprocess.run(["which", "import"], capture_output=True).returncode == 0:
+                subprocess.run(["import", "-window", "root", str(screenshot_path)], check=True)
+            else:
+                print("[Code] ⚠️ No screenshot tool found (need scrot or imagemagick).")
+                return None
+                
         print(f"[Code] 📸 Screenshot: {screenshot_path}")
         return screenshot_path
     except Exception as e:

@@ -6,9 +6,9 @@ import math
 import random
 import time
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import QWidget
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QWidget
 
 from ui_theme import C, qcol
 

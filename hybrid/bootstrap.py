@@ -53,7 +53,11 @@ _TOOL_META: dict[str, dict[str, Any]] = {
     "contact_manager": {"agent": "memory", "category": "memory", "fast": False},
     "save_memory": {"agent": "memory", "category": "memory", "internal": True, "fast": False},
     "agent_task": {"agent": "tool", "category": "agent", "fast": False},
+    "create_action": {"agent": "system", "category": "dev", "fast": False},
+    "spawn_agent": {"agent": "tool", "category": "agent", "fast": False},
     "shutdown_aria": {"agent": "system", "category": "system", "internal": True, "fast": False},
+    "memory_tool": {"agent": "memory", "category": "memory", "fast": True},
+    "screen_analyze": {"agent": "research", "category": "vision", "fast": False},
 }
 
 
@@ -98,8 +102,6 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.open_app import open_app
     from actions.organizer import organizer_control
     from actions.reminder import reminder
-    from actions.screen_act import screen_act
-    from actions.screen_processor import screen_process
     from actions.send_email import send_email
     from actions.send_message import send_message
     from actions.system_control import system_control
@@ -107,6 +109,9 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.download_control import download_control
     from actions.web_search import web_search as web_search_action
     from actions.youtube_video import youtube_video
+    from actions.create_action import create_action
+    from actions.create_presentation import create_presentation
+    from actions.screen_analyze import screen_analyze
 
     return {
         "open_app": _wrap_action(open_app, use_response=True, use_session_memory=True),
@@ -122,9 +127,7 @@ def _build_handlers() -> dict[str, Callable]:
         "organizer_control": _wrap_action(organizer_control),
         "document_tools": _wrap_action(document_tools),
         "list_manager": _wrap_action(list_manager),
-        "screen_act": _wrap_action(screen_act),
         "youtube_video": _wrap_action(youtube_video, use_response=True),
-        "screen_process": _wrap_action(screen_process, use_response=True, use_session_memory=True),
         "system_control": _wrap_action(system_control),
         "computer_settings": _wrap_action(computer_settings, use_response=True),
         "desktop_control": _wrap_action(desktop_control),
@@ -137,8 +140,34 @@ def _build_handlers() -> dict[str, Callable]:
         "file_processor": _file_processor_handler,
         "computer_control": _wrap_action(computer_control),
         "flight_finder": _wrap_action(flight_finder),
+        "create_action": _wrap_action(create_action),
+        "create_presentation": _wrap_action(create_presentation),
+        "spawn_agent": _spawn_agent_handler,
+        "memory_tool": _memory_tool_handler,
+        "screen_analyze": _wrap_action(screen_analyze, use_response=True),
         "shutdown_aria": lambda _a, _c: "Goodbye.",
     }
+
+
+def _memory_tool_handler(args: dict, ctx: ExecutionContext) -> str:
+    from core.memory_rag import store_memory, retrieve_relevant_memory
+    action = args.get("action", "")
+    content = args.get("content", "")
+    category = args.get("category", "general")
+    
+    if action == "store":
+        if store_memory(category, content):
+            return f"Successfully stored memory in category '{category}'"
+        return "Failed to store memory."
+    elif action == "retrieve":
+        memories = retrieve_relevant_memory(content, top_k=3, category=category if category != "general" else None)
+        if not memories:
+            return "No relevant memories found."
+        out = "Memories found:\n"
+        for m in memories:
+            out += f"- [{m['metadata'].get('category', 'general')}]: {m['content']}\n"
+        return out
+    return "Invalid action. Use 'store' or 'retrieve'."
 
 
 def _file_processor_handler(args: dict, ctx: ExecutionContext) -> str:
@@ -210,9 +239,55 @@ def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:
     return f"Task started (ID: {task_id})."
 
 
+def _spawn_agent_handler(args: dict, ctx: ExecutionContext) -> str:
+    agent_type = args.get("agent_type")
+    goal = args.get("goal")
+    if not agent_type or not goal:
+        return "Error: agent_type and goal are required."
+    
+    from core.sub_agents import BUILT_IN_AGENTS, run_sub_agent
+    
+    spec = BUILT_IN_AGENTS.get(agent_type)
+    if not spec:
+        return f"Error: Unknown agent type '{agent_type}'. Available: {', '.join(BUILT_IN_AGENTS.keys())}"
+        
+    try:
+        result = run_sub_agent(spec, goal, ctx, on_step=lambda s: print(f"[SubAgent:{agent_type}] {s.tool}() -> {s.ok}"))
+        return f"Sub-agent '{agent_type}' finished. Result:\n{result.answer}"
+    except Exception as e:
+        return f"Sub-agent '{agent_type}' crashed: {e}"
+
+
 def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
     registry = registry or ToolRegistry.instance()
     handlers = _build_handlers()
+
+    # Dynamic Tool Discovery: Auto-load any new actions in the actions/ folder
+    import importlib.util
+    from pathlib import Path
+    
+    actions_dir = Path(__file__).parent.parent / "actions"
+    if actions_dir.exists():
+        for py_file in actions_dir.glob("*.py"):
+            if py_file.name.startswith("_") or py_file.name == "dev_run.py":
+                continue
+            
+            module_name = py_file.stem
+            if module_name not in handlers:
+                try:
+                    spec = importlib.util.spec_from_file_location(module_name, py_file)
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        if hasattr(mod, "TOOL_DECLARATION") and hasattr(mod, module_name):
+                            decl = mod.TOOL_DECLARATION
+                            # Append to declarations if not already there
+                            if decl not in TOOL_DECLARATIONS:
+                                TOOL_DECLARATIONS.append(decl)
+                            handlers[module_name] = _wrap_action(getattr(mod, module_name))
+                            print(f"[ToolRegistry] Dynamically loaded {module_name}")
+                except Exception as e:
+                    print(f"[ToolRegistry] Failed to dynamic load {module_name}: {e}")
 
     for decl in TOOL_DECLARATIONS:
         name = decl["name"]

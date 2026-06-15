@@ -19,7 +19,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _run_generated_code(description: str, speak: Callable | None = None) -> str:

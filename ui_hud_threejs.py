@@ -2,13 +2,13 @@ import json
 import os
 import time
 
-from PyQt6.QtCore import QUrl, QUrlQuery, Qt
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtCore import QUrl, QUrlQuery, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-    from PyQt6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEngineSettings
     HAS_WEBENGINE = True
 except ImportError:
     QWebEngineView = None  # type: ignore

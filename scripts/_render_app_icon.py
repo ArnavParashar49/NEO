@@ -7,9 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPainter, QPixmap
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtWidgets import QApplication
 
 
 def main() -> None:

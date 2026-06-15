@@ -129,17 +129,12 @@ def _launch_windows(app_name: str) -> bool:
             pass
 
     try:
-        import pyautogui
-        pyautogui.PAUSE = 0.1
-        pyautogui.press("win")
-        time.sleep(0.7)
-        pyautogui.write(app_name, interval=0.05)
-        time.sleep(0.9)
-        pyautogui.press("enter")
-        time.sleep(2.5)
+        # Fallback to powershell start-process
+        subprocess.Popen(f"powershell -WindowStyle Hidden -Command \"Start-Process '{app_name}'\"", shell=True)
+        time.sleep(1.0)
         return True
     except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
+        print(f"[open_app] PowerShell fallback failed: {e}")
 
     return False
 

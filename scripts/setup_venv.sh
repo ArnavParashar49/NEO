@@ -35,4 +35,8 @@ pip install --upgrade pip setuptools wheel certifi
 # Install project dependencies
 pip install -r requirements.txt
 
+# Pre-download the ChromaDB local embedding model so it's ready without delay
+echo "Downloading ChromaDB local embedding model (~80MB)..."
+python -c "import chromadb.utils.embedding_functions as ef; ef.DefaultEmbeddingFunction()(['init'])" || true
+
 echo "✅ Virtual environment is set up and dependencies installed."

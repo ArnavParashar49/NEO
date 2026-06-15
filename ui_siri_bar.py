@@ -8,17 +8,17 @@ import random
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import (
+from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
     QRect,
     QRectF,
     Qt,
     QTimer,
-    pyqtSignal,
+    Signal,
 )
-from PyQt6.QtGui import QBrush, QColor, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
-from PyQt6.QtWidgets import (
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
+from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -301,34 +301,34 @@ class SiriOrbSlot(QWidget):
 class SiriBarWindow(QWidget):
     """Frameless circular orb overlay."""
 
-    open_full_window_requested = pyqtSignal()
+    open_full_window_requested = Signal()
 
-    req_slide_in = pyqtSignal()
-    req_slide_out = pyqtSignal()
-    req_show_compact = pyqtSignal()
-    req_toggle = pyqtSignal()
-    req_cancel_hide = pyqtSignal()
-    req_schedule_hide = pyqtSignal(int)
-    req_apply_state = pyqtSignal(str)
-    req_set_prompt = pyqtSignal(str)
-    req_append_log = pyqtSignal(str)
-    req_stream = pyqtSignal(str)
-    req_stream_end = pyqtSignal(str, object)
-    req_progress_start = pyqtSignal(int, str)
-    req_set_activity = pyqtSignal(str)
-    req_progress_stop = pyqtSignal()
-    req_audio = pyqtSignal(object)
-    req_collapse_panel = pyqtSignal()
-    req_collapse_camera = pyqtSignal()
+    req_slide_in = Signal()
+    req_slide_out = Signal()
+    req_show_compact = Signal()
+    req_toggle = Signal()
+    req_cancel_hide = Signal()
+    req_schedule_hide = Signal(int)
+    req_apply_state = Signal(str)
+    req_set_prompt = Signal(str)
+    req_append_log = Signal(str)
+    req_stream = Signal(str)
+    req_stream_end = Signal(str, object)
+    req_progress_start = Signal(int, str)
+    req_set_activity = Signal(str)
+    req_progress_stop = Signal()
+    req_audio = Signal(object)
+    req_collapse_panel = Signal()
+    req_collapse_camera = Signal()
 
-    _log_sig = pyqtSignal(str)
-    _stream_sig = pyqtSignal(str)
-    _stream_end_sig = pyqtSignal(str, object)
-    _progress_start_sig = pyqtSignal(int, str)
-    _progress_stop_sig = pyqtSignal()
-    _prompt_sig = pyqtSignal(str)
-    _expand_sig = pyqtSignal()
-    _collapse_sig = pyqtSignal()
+    _log_sig = Signal(str)
+    _stream_sig = Signal(str)
+    _stream_end_sig = Signal(str, object)
+    _progress_start_sig = Signal(int, str)
+    _progress_stop_sig = Signal()
+    _prompt_sig = Signal(str)
+    _expand_sig = Signal()
+    _collapse_sig = Signal()
 
     def __init__(self, face_path: str = "", main_window=None, parent=None):
         super().__init__(parent)
@@ -360,12 +360,14 @@ class SiriBarWindow(QWidget):
 
         self.setWindowFlags(
             Qt.WindowType.Window
+            | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setStyleSheet("background: transparent;")
 
         self._outer = QVBoxLayout(self)
@@ -692,7 +694,6 @@ class SiriBarWindow(QWidget):
     def _layout_orb(self) -> None:
         inset = (_DISC_SIZE - _ORB_SIZE) // 2
         self._orb.setGeometry(inset, inset, _ORB_SIZE, _ORB_SIZE)
-        self._orb.raise_()
 
     def _apply_disc_size(self):
         from ui_theme import panel_card_compact_stylesheet
@@ -909,7 +910,6 @@ class SiriBarWindow(QWidget):
             self.clearMask()
             self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
             self.show()
-            self.raise_()
 
             def _after_slide() -> None:
                 self._docked = True
@@ -954,7 +954,6 @@ class SiriBarWindow(QWidget):
         self.setGeometry(orb_geo)
         self.clearMask()
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
-        self.raise_()
 
         anim = self._run_geometry_anim(orb_geo, end, _CAMERA_EXPAND_MS)
 
@@ -1020,7 +1019,6 @@ class SiriBarWindow(QWidget):
             orb = self._clamp_geometry(self._target_rect(offscreen=False))
             self._apply_expanded_chrome()
             self.show()
-            self.raise_()
             self._snap_expanded_geometry(orb)
             return
 
@@ -1031,7 +1029,6 @@ class SiriBarWindow(QWidget):
             self.setWindowOpacity(1.0)
             self.setGeometry(end)
             self.show()
-            self.raise_()
             return
 
         self._stop_anim()
@@ -1042,7 +1039,6 @@ class SiriBarWindow(QWidget):
         self.setWindowOpacity(0.0)
         self.setGeometry(start)
         self.show()
-        self.raise_()
         app = QApplication.instance()
         if app:
             app.processEvents()
@@ -1169,7 +1165,6 @@ class SiriBarWindow(QWidget):
         self.setGeometry(orb_geo)
         self.clearMask()
         self.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, False)
-        self.raise_()
 
         # grow out of the robot's spot while fading in — feels like the window
         # opens from the buddy's face (the fade also hides the cram-reflow).
@@ -1236,7 +1231,6 @@ class SiriBarWindow(QWidget):
             if self._visible_target:
                 self.setGeometry(orb_end)
                 self.show()
-                self.raise_()
                 self._docked = True
             self._expanded = False
             self._update_window_mask()

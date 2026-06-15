@@ -2,6 +2,30 @@
 
 TOOL_DECLARATIONS = [
     {
+        "name": "memory_tool",
+        "description": "Store or retrieve long-term memories using the RAG database. Use this to remember user preferences, learned lessons, or past errors. Do NOT announce that you are saving to memory — just call the tool silently.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":   {"type": "STRING", "description": "store | retrieve"},
+                "category": {"type": "STRING", "description": "Category of memory (e.g. preference, lesson, code)"},
+                "content":  {"type": "STRING", "description": "The memory content to store or search query to retrieve"},
+            },
+            "required": ["action", "content"]
+        }
+    },
+    {
+        "name": "screen_analyze",
+        "description": "Takes a screenshot of the user's screen and uses a Vision model to answer questions about what is on it. Use this whenever the user asks 'what is on my screen', 'read this error', or 'what am I looking at'.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Specific question about the screen contents (e.g. 'What does the error message say?')"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
         "name": "open_app",
         "description": (
             "Opens any application on the computer. "
@@ -24,8 +48,8 @@ TOOL_DECLARATIONS = [
         "description": (
             "Searches the web for information, news, product recommendations, prices, "
             "laptops, phones, TVs, and comparisons. Also use when user asks to SEE or "
-            "SHOW product images — pass product names in the query. "
-            "NEVER use screen_process for product or search questions."
+            "laptops, phones, TVs, and comparisons. Also use when user asks to SEE or "
+            "SHOW product images — pass product names in the query."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -263,24 +287,6 @@ TOOL_DECLARATIONS = [
         }
     },
     {
-        "name": "screen_act",
-        "description": (
-            "Captures the screen or camera, describes what is visible, and can click/type. "
-            "Use for 'what's on my screen', reading the display, or acting on UI elements."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "question": {"type": "STRING", "description": "What to look for or do on screen"},
-                "text":     {"type": "STRING", "description": "Same as question"},
-                "mode":     {"type": "STRING", "description": "explain (default) | act | click"},
-                "execute":  {"type": "BOOLEAN", "description": "true to perform suggested click/type/open after explaining"},
-                "angle":    {"type": "STRING", "description": "screen | camera (default screen)"},
-            },
-            "required": []
-        }
-    },
-    {
         "name": "youtube_video",
         "description": (
             "Controls YouTube. Use for: playing videos, summarizing a video's content, "
@@ -296,22 +302,6 @@ TOOL_DECLARATIONS = [
                 "url":    {"type": "STRING", "description": "Video URL for get_info action"},
             },
             "required": []
-        }
-    },
-    {
-        "name": "screen_process",
-        "description": (
-            "Captures and analyzes the user's screen or webcam, then answers their question. "
-            "Set angle=camera for webcam — live preview with local YOLO labels, DeepFace for remember/who. "
-            "Remember person: user says remember this as [name]. Fully offline if local_vision_offline is true in config."
-        ),
-        "parameters": {
-            "type": "OBJECT",
-            "properties": {
-                "angle": {"type": "STRING", "description": "'camera' for webcam/object ID (opens preview), 'screen' for display. Default: screen"},
-                "text":  {"type": "STRING", "description": "The question or instruction about the captured image"}
-            },
-            "required": ["text"]
         }
     },
     {
@@ -510,29 +500,20 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "computer_control",
-        "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+        "description": "Direct computer control: focus window, wait, random data generation.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":      {"type": "STRING", "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | random_data | user_data"},
-                "text":        {"type": "STRING", "description": "Text to type or paste"},
-                "x":           {"type": "INTEGER", "description": "X coordinate"},
-                "y":           {"type": "INTEGER", "description": "Y coordinate"},
-                "keys":        {"type": "STRING", "description": "Key combination e.g. 'ctrl+c'"},
-                "key":         {"type": "STRING", "description": "Single key e.g. 'enter'"},
-                "direction":   {"type": "STRING", "description": "up | down | left | right"},
-                "amount":      {"type": "INTEGER", "description": "Scroll amount (default: 3)"},
+                "action":      {"type": "STRING", "description": "wait | focus_window | random_data | user_data"},
                 "seconds":     {"type": "NUMBER",  "description": "Seconds to wait"},
                 "title":       {"type": "STRING",  "description": "Window title for focus_window"},
-                "description": {"type": "STRING",  "description": "Element description for screen_find/screen_click"},
-                "type":        {"type": "STRING",  "description": "Data type for random_data"},
-                "field":       {"type": "STRING",  "description": "Field for user_data: name|email|city"},
-                "clear_first": {"type": "BOOLEAN", "description": "Clear field before typing (default: true)"},
-                "path":        {"type": "STRING",  "description": "Save path for screenshot"},
+                "type":        {"type": "STRING",  "description": "Data type for random_data (e.g. name, email, city)"},
+                "field":       {"type": "STRING",  "description": "Field for user_data: name | email | phone"},
             },
             "required": ["action"]
         }
     },
+
     {
         "name": "flight_finder",
         "description": "Searches Google Flights and speaks the best options.",
@@ -624,35 +605,91 @@ TOOL_DECLARATIONS = [
         "required": []
     }
 },
+
     {
-        "name": "save_memory",
+        "name": "create_action",
         "description": (
-            "Save an important personal fact about the user to long-term memory. "
-            "Call this silently whenever the user reveals something worth remembering: "
-            "name, age, city, job, preferences, hobbies, relationships, projects, or future plans. "
-            "Do NOT call for: weather, reminders, searches, or one-time commands. "
-            "Do NOT announce that you are saving — just call it silently. "
-            "Values must be in English regardless of the conversation language."
+            "Writes and registers a new ARIA tool dynamically! Use this whenever you are asked to do something "
+            "that requires a Python script, an API call, or a capability you don't currently have. "
+            "You MUST provide the full, valid Python code. The code MUST contain a dictionary named "
+            "`TOOL_DECLARATION` at the top level with 'name', 'description', and 'parameters'. "
+            "The file MUST also define a function with the exact same name as 'tool_name' that accepts a `parameters: dict` argument."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "category": {
-                    "type": "STRING",
-                    "description": (
-                        "identity — name, age, birthday, city, job, language, nationality | "
-                        "preferences — favorite food/color/music/film/game/sport, hobbies | "
-                        "contacts — name, email, phone for people they email or call | "
-                        "projects — active projects, goals, things being built | "
-                        "relationships — friends, family, partner, colleagues | "
-                        "wishes — future plans, things to buy, travel dreams | "
-                        "notes — habits, schedule, anything else worth remembering"
-                    )
-                },
-                "key":   {"type": "STRING", "description": "Short snake_case key (e.g. name, favorite_food, sister_name)"},
-                "value": {"type": "STRING", "description": "Concise value in English (e.g. AP, pizza, older sister)"},
+                "tool_name": {"type": "STRING", "description": "Name of the tool (snake_case, e.g. 'get_crypto_price')"},
+                "code":      {"type": "STRING", "description": "Full Python code including imports, TOOL_DECLARATION, and the function"}
             },
-            "required": ["category", "key", "value"]
+            "required": ["tool_name", "code"]
         }
     },
+    {
+        "name": "spawn_agent",
+        "description": (
+            "Delegates a task to a specialised sub-agent that runs in its own isolated context "
+            "with a focused tool set. Use this for complex goals that benefit from specialisation. "
+            "Available agent types: researcher (web research, comparisons), coder (write/run code), "
+            "system_ops (OS tasks, file management, app control), comms (email, messages, calendar). "
+            "The sub-agent runs autonomously and returns the result."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agent_type": {
+                    "type": "STRING",
+                    "description": "Type of sub-agent: researcher | coder | system_ops | comms"
+                },
+                "goal": {
+                    "type": "STRING",
+                    "description": "Clear, complete description of what this sub-agent should accomplish"
+                }
+            },
+            "required": ["agent_type", "goal"]
+        }
+    }
+,
+    {
+        "name": "create_presentation",
+        "description": "Creates a PowerPoint presentation (.pptx) based on the provided title, subtitle, and slide data. Use this whenever the user asks you to make or create a presentation.",
+        "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                        "title": {
+                                "type": "STRING",
+                                "description": "The title of the presentation."
+                        },
+                        "subtitle": {
+                                "type": "STRING",
+                                "description": "An optional subtitle for the presentation."
+                        },
+                        "slides": {
+                                "type": "ARRAY",
+                                "description": "A list of slides. Each slide should have a title and a list of bullet points.",
+                                "items": {
+                                        "type": "OBJECT",
+                                        "properties": {
+                                                "title": {
+                                                        "type": "STRING"
+                                                },
+                                                "bullets": {
+                                                        "type": "ARRAY",
+                                                        "items": {
+                                                                "type": "STRING"
+                                                        }
+                                                }
+                                        },
+                                        "required": [
+                                                "title",
+                                                "bullets"
+                                        ]
+                                }
+                        }
+                },
+                "required": [
+                        "title",
+                        "slides"
+                ]
+        }
+}
 ]

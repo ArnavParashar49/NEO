@@ -15,9 +15,6 @@ import sounddevice as sd
 from google import genai
 from google.genai import types
 from ui import AriaUI
-from memory.memory_manager import (
-    load_memory, update_memory, format_memory_for_prompt,
-)
 
 from actions.file_processor import file_processor
 from actions.flight_finder     import flight_finder
@@ -32,10 +29,8 @@ from actions.notes             import notes_control
 from actions.organizer         import organizer_control
 from actions.document_tools    import document_tools
 from actions.list_manager      import list_manager
-from actions.screen_act        import screen_act
 from actions.computer_settings import computer_settings
 from actions.system_control    import system_control
-from actions.screen_processor  import screen_process
 from actions.youtube_video     import youtube_video
 from actions.desktop           import desktop_control
 from actions.browser_control   import browser_control
@@ -56,7 +51,6 @@ def get_base_dir():
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
@@ -387,24 +381,19 @@ def _tool_status_line(name: str, args: dict) -> str:
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
-
+    from config import get_api_key
+    return get_api_key(required=False)
 
 _GEMINI_API_HOST = "generativelanguage.googleapis.com"
 
-
 def _api_key_config_error() -> str | None:
     """Return a user-facing message when the Gemini key is missing or a placeholder."""
-    try:
-        key = (_get_api_key() or "").strip()
-    except (FileNotFoundError, KeyError, json.JSONDecodeError, TypeError):
-        return "Missing config/api_keys.json with gemini_api_key."
+    key = _get_api_key().strip()
     if not key:
-        return "gemini_api_key is empty in config/api_keys.json."
+        return "gemini_api_key is empty in the settings."
     lowered = key.lower()
     if lowered in {"your-api-key", "your_api_key", "paste-key-here"} or "your" in lowered and "key" in lowered:
-        return "Replace the placeholder gemini_api_key in config/api_keys.json."
+        return "Replace the placeholder gemini_api_key."
     return None
 
 
@@ -450,8 +439,7 @@ def _connect_error_message(kind: str, exc: BaseException | None = None) -> str:
         return "No internet — can't reach Gemini. Check Wi‑Fi or DNS, then ARIA will retry."
     if kind == "auth":
         return (
-            "Gemini rejected the API key. Open config/api_keys.json, paste a valid "
-            "gemini_api_key from Google AI Studio, and ensure the Gemini API is enabled."
+            "Gemini rejected the API key. Please update it."
         )
     if kind == "transient":
         return "Live session dropped — reconnecting…"
@@ -472,12 +460,8 @@ def _fast_path_args_key(tool_name: str, args: dict) -> str:
 
 
 def _load_app_config() -> dict:
-    try:
-        with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    from config import get_config
+    return get_config()
 
 
 def _smart_mode_enabled() -> bool:
@@ -913,7 +897,6 @@ class AriaLive:
             "flight_finder": 20,
             "file_processor": 15,
             "agent_task": 25,
-            "screen_process": 10,
             "dev_agent": 20,
             "project_builder": 25,
             "weather_report": 12,
@@ -1455,8 +1438,6 @@ class AriaLive:
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
 
-        memory     = load_memory()
-        mem_str    = format_memory_for_prompt(memory)
         sys_prompt = _load_system_prompt()
 
         now      = datetime.now()
@@ -1468,8 +1449,6 @@ class AriaLive:
         )
 
         parts = [time_ctx]
-        if mem_str:
-            parts.append(mem_str)
         parts.append(sys_prompt)
 
         return types.LiveConnectConfig(
@@ -1546,12 +1525,6 @@ class AriaLive:
         self._speak_tool_result_hints(text)
         if show_progress and text and not text.startswith("Tool '"):
             self._show_status_text(text.split("\n")[0][:180])
-        if name == "save_memory" and self._mic_live:
-            self.ui.set_state("LISTENING")
-        elif self._mic_live:
-            self.ui.set_state("LISTENING")
-        elif self._smart_mode and self._get_phase() == MicPhase.AI_RESPONDING and not self._processing:
-            self.ui.siri_set_prompt("I'm listening…")
         print(f"[ARIA] 📤 {name} → {text[:80]}")
 
     async def _send_realtime(self):

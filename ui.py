@@ -11,16 +11,16 @@ import threading
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import (
+from PySide6.QtCore import (
     QEasingCurve, QMimeData, QObject, QPointF, QRectF, QSize, Qt,
-    QTimer, QUrl, pyqtSignal,
+    QTimer, QUrl, Signal,
 )
-from PyQt6.QtGui import (
+from PySide6.QtGui import (
     QBrush, QColor, QDragEnterEvent, QDropEvent, QFont, QFontDatabase,
     QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
     QRadialGradient, QShortcut, QTextCharFormat, QTextCursor,
 )
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QTextEdit,
     QVBoxLayout, QWidget, QProgressBar,
@@ -64,7 +64,7 @@ from ui_panel import ChatView
 
 
 class LogWidget(QTextEdit):
-    _sig = pyqtSignal(str)
+    _sig = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -254,7 +254,7 @@ _FILE_DIALOG_FILTER = (
 class CommandBar(QWidget):
     """Command input with attach and drag-and-drop."""
 
-    file_selected = pyqtSignal(str)
+    file_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -369,7 +369,7 @@ class CommandBar(QWidget):
 
 
 class SetupOverlay(QWidget):
-    done = pyqtSignal(str, str)
+    done = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -503,7 +503,7 @@ class SetupOverlay(QWidget):
 
 class _FooterStrip(QWidget):
     """Double-click anywhere on the footer to collapse back to the orb."""
-    collapse_requested = pyqtSignal()
+    collapse_requested = Signal()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -514,13 +514,13 @@ class _FooterStrip(QWidget):
 
 
 class MainWindow(QMainWindow):
-    _log_sig    = pyqtSignal(str)
-    _state_sig  = pyqtSignal(str)
-    _progress_start_sig = pyqtSignal(int)
-    _progress_stop_sig  = pyqtSignal()
-    _aria_stream_sig    = pyqtSignal(str)
-    _aria_stream_end_sig = pyqtSignal(str, object)
-    panel_collapse_requested = pyqtSignal()
+    _log_sig    = Signal(str)
+    _state_sig  = Signal(str)
+    _progress_start_sig = Signal(int)
+    _progress_stop_sig  = Signal()
+    _aria_stream_sig    = Signal(str)
+    _aria_stream_end_sig = Signal(str, object)
+    panel_collapse_requested = Signal()
 
     def __init__(self, face_path: str = ""):
         super().__init__()
@@ -947,26 +947,22 @@ def _hide_dock_icon() -> None:
     if platform.system() != "Darwin":
         return
     try:
-        from AppKit import (
-            NSApplication,
-            NSApplicationActivationPolicyAccessory,
-        )
-        NSApplication.sharedApplication().setActivationPolicy_(
-            NSApplicationActivationPolicyAccessory
-        )
+        import AppKit
+        AppKit.NSApp.setActivationPolicy_(1)
+        print("[Tray] Dock icon hidden successfully via AppKit")
     except Exception as e:  # pragma: no cover - best effort
         print(f"[Tray] could not hide Dock icon: {e}")
 
 
 class _UiDispatcher(QObject):
     """Marshals UI work onto the Qt main thread."""
-    hide_main = pyqtSignal()
-    show_screen_border = pyqtSignal()
-    hide_screen_border = pyqtSignal()
-    begin_camera_session = pyqtSignal(int, int)  # camera_index, backend
-    hide_camera_preview = pyqtSignal()
-    set_camera_status = pyqtSignal(str)
-    request_email = pyqtSignal(object)  # holder; show main window + capture typed address
+    hide_main = Signal()
+    show_screen_border = Signal()
+    hide_screen_border = Signal()
+    begin_camera_session = Signal(int, int)  # camera_index, backend
+    hide_camera_preview = Signal()
+    set_camera_status = Signal(str)
+    request_email = Signal(object)  # holder; show main window + capture typed address
 
 
 class AriaUI:
