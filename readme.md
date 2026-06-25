@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="assets/icon.png" width="120" alt="NEO"/>
-
 # NEO
 
 **A real-time, voice-first AI companion that lives in your menu bar — hears, sees, remembers, and controls your computer.**
