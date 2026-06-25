@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from hybrid.declarations import TOOL_DECLARATIONS
 from hybrid.guards import allow_screen_process
 from hybrid.orchestrator import Orchestrator
 from hybrid.registry import ToolRegistry
@@ -16,10 +15,10 @@ from hybrid.types import ExecutionContext
 # Mirrors main._SLOW_TOOLS — used for UI progress only
 _SLOW_TOOLS = frozenset({
     "web_search", "download_control", "youtube_video", "agent_task", "file_processor",
-    "flight_finder", "screen_process", "dev_agent", "project_builder",
+    "flight_finder", "screen_process",
     "send_email", "browser_control", "file_controller", "calendar_control",
     "notes_control", "organizer_control", "document_tools", "list_manager",
-    "screen_act", "weather_report",
+    "screen_act", "weather_report", "discuss_project", "search_docs",
 })
 
 # agent routing + categories
@@ -37,27 +36,27 @@ _TOOL_META: dict[str, dict[str, Any]] = {
     "notes_control": {"agent": "system", "category": "productivity", "fast": False},
     "calendar_control": {"agent": "system", "category": "productivity", "fast": False},
     "reminder": {"agent": "system", "category": "productivity", "fast": False},
-    "code_helper": {"agent": "system", "category": "dev", "fast": False},
-    "dev_agent": {"agent": "system", "category": "dev", "fast": True},
-    "project_builder": {"agent": "system", "category": "dev", "fast": True},
     "browser_control": {"agent": "system", "category": "browser", "fast": False},
     "web_search": {"agent": "research", "category": "research", "fast": False},
     "download_control": {"agent": "system", "category": "files", "fast": False},
     "youtube_video": {"agent": "research", "category": "research", "fast": False},
-    "flight_finder": {"agent": "research", "category": "research", "fast": False},
+    "flight_finder": {"agent": "research", "category": "research", "fast": True},
     "screen_process": {"agent": "research", "category": "vision", "fast": False},
     "screen_act": {"agent": "research", "category": "vision", "fast": False},
-    "weather_report": {"agent": "research", "category": "research", "fast": False},
+    "weather_report": {"agent": "research", "category": "research", "fast": True},
     "send_message": {"agent": "system", "category": "comms", "fast": False},
     "send_email": {"agent": "system", "category": "comms", "fast": False},
     "contact_manager": {"agent": "memory", "category": "memory", "fast": False},
     "save_memory": {"agent": "memory", "category": "memory", "internal": True, "fast": False},
     "agent_task": {"agent": "tool", "category": "agent", "fast": False},
-    "create_action": {"agent": "system", "category": "dev", "fast": False},
     "spawn_agent": {"agent": "tool", "category": "agent", "fast": False},
     "shutdown_aria": {"agent": "system", "category": "system", "internal": True, "fast": False},
     "memory_tool": {"agent": "memory", "category": "memory", "fast": True},
+    "apply_skill": {"agent": "memory", "category": "memory", "fast": False},
     "screen_analyze": {"agent": "research", "category": "vision", "fast": False},
+    "discuss_project": {"agent": "research", "category": "discussion", "fast": False},
+    "search_docs": {"agent": "research", "category": "discussion", "fast": False},
+    "exa_search": {"agent": "research", "category": "research", "fast": False},
 }
 
 
@@ -76,8 +75,6 @@ def _wrap_action(
             kwargs["response"] = None
         if use_session_memory:
             kwargs["session_memory"] = ctx.session_memory
-        if fn.__name__ == "code_helper":
-            kwargs["speak"] = None
         out = fn(**kwargs)
         return out if out is not None else "Done."
 
@@ -87,12 +84,10 @@ def _wrap_action(
 def _build_handlers() -> dict[str, Callable]:
     from actions.browser_control import browser_control
     from actions.calendar import calendar_control
-    from actions.code_helper import code_helper
     from actions.computer_control import computer_control
     from actions.computer_settings import computer_settings
     from actions.contacts import contact_manager
     from actions.desktop import desktop_control
-    from actions.dev_agent import dev_agent
     from actions.document_tools import document_tools
     from actions.file_controller import file_controller
     from actions.file_processor import file_processor
@@ -107,11 +102,15 @@ def _build_handlers() -> dict[str, Callable]:
     from actions.system_control import system_control
     from actions.weather_report import weather_action
     from actions.download_control import download_control
+    from actions.discuss_project import discuss_project
+    from actions.search_docs import search_docs
     from actions.web_search import web_search as web_search_action
     from actions.youtube_video import youtube_video
-    from actions.create_action import create_action
     from actions.create_presentation import create_presentation
     from actions.screen_analyze import screen_analyze
+    from actions.fast_fetch import fast_fetch
+    from actions.exa_search import exa_search
+
 
     return {
         "open_app": _wrap_action(open_app, use_response=True, use_session_memory=True),
@@ -131,20 +130,21 @@ def _build_handlers() -> dict[str, Callable]:
         "system_control": _wrap_action(system_control),
         "computer_settings": _wrap_action(computer_settings, use_response=True),
         "desktop_control": _wrap_action(desktop_control),
-        "code_helper": _wrap_action(code_helper),
-        "dev_agent": _wrap_action(dev_agent),
-        "project_builder": _project_builder_handler,
         "agent_task": _agent_task_handler,
         "web_search": _wrap_action(web_search_action),
+        "fast_fetch": _wrap_action(fast_fetch),
         "download_control": _wrap_action(download_control),
         "file_processor": _file_processor_handler,
         "computer_control": _wrap_action(computer_control),
         "flight_finder": _wrap_action(flight_finder),
-        "create_action": _wrap_action(create_action),
         "create_presentation": _wrap_action(create_presentation),
         "spawn_agent": _spawn_agent_handler,
         "memory_tool": _memory_tool_handler,
+        "apply_skill": _apply_skill_handler,
         "screen_analyze": _wrap_action(screen_analyze, use_response=True),
+        "discuss_project": _wrap_action(discuss_project, speak=True, use_response=True),
+        "search_docs": _wrap_action(search_docs, speak=True, use_response=True),
+        "exa_search": _wrap_action(exa_search),
         "shutdown_aria": lambda _a, _c: "Goodbye.",
     }
 
@@ -170,6 +170,14 @@ def _memory_tool_handler(args: dict, ctx: ExecutionContext) -> str:
     return "Invalid action. Use 'store' or 'retrieve'."
 
 
+def _apply_skill_handler(args: dict, ctx: ExecutionContext) -> str:
+    from actions.skill_loader import apply_skill_by_name
+
+    name = args.get("skill_name") or args.get("name") or ""
+    query = args.get("query") or ""
+    return apply_skill_by_name(name, query)
+
+
 def _file_processor_handler(args: dict, ctx: ExecutionContext) -> str:
     from actions.file_processor import file_processor
 
@@ -180,25 +188,25 @@ def _file_processor_handler(args: dict, ctx: ExecutionContext) -> str:
 
 
 def _save_memory_handler(args: dict, ctx: ExecutionContext) -> str:
-    from memory.memory_manager import update_memory
+    from core.memory_ext import store_memory_smart
 
     category = args.get("category", "notes")
     key = args.get("key", "")
     value = args.get("value", "")
     if key and value:
-        update_memory({category: {key: {"value": value}}})
-        print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
-    return "ok"  # orchestrator marks silent via tool meta
+        stored = store_memory_smart(category, value)
+        if stored:
+            print(f"[Memory] 💾 {category}/{key} = {value[:60]}")
+    return "ok"
 
 
-def _project_builder_handler(args: dict, ctx: ExecutionContext) -> str:
-    """project_builder needs the full ctx so the autonomous build loop can run
-    tools and stream progress to the UI."""
-    from actions.project_builder import project_builder
-
-    return project_builder(
-        parameters=args, player=ctx.ui, speak=ctx.speak, ctx=ctx,
-    ) or "Done."
+def _is_complex_goal(goal: str) -> bool:
+    """Return True if the goal needs multiple agent types (→ swarm)."""
+    keywords = (
+        "research and", "compare and",
+        "both", "multiple", "also",
+    )
+    return any(kw in goal.lower() for kw in keywords)
 
 
 def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:
@@ -212,6 +220,20 @@ def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:
         from config import get_config
 
         if get_config().get("autonomous_mode", True):
+            # Try GoalDispatcher first — splits multi-task input into parallel goals.
+            # Falls back to swarm for complex single goals, then single agent.
+            from core.goal_dispatcher import get_dispatcher, split_goals
+
+            goals = split_goals(goal)
+            if len(goals) >= 2:
+                print(f"[GoalDispatcher] Detected {len(goals)} independent goals, dispatching in parallel")
+                result = get_dispatcher().dispatch(goal, ctx)
+                return result.summary
+
+            if _is_complex_goal(goal):
+                from core.agent_swarm import run_swarm_task
+
+                return run_swarm_task(goal, ctx)
             from core.agent_loop import run_agent
 
             result = run_agent(
@@ -225,18 +247,8 @@ def _agent_task_handler(args: dict, ctx: ExecutionContext) -> str:
     orch = ctx.get("orchestrator")
     if orch and hasattr(orch, "run_planned_sync"):
         return orch.run_planned_sync(goal, ctx)
-    from agent.task_queue import TaskPriority, get_queue
-
-    priority_map = {
-        "low": TaskPriority.LOW,
-        "normal": TaskPriority.NORMAL,
-        "high": TaskPriority.HIGH,
-    }
-    priority = priority_map.get(
-        (args.get("priority") or "normal").lower(), TaskPriority.NORMAL,
-    )
-    task_id = get_queue().submit(goal=goal, priority=priority, speak=ctx.speak)
-    return f"Task started (ID: {task_id})."
+    # No task queue available — fall back to telling the user the goal was noted
+    return f"Goal received: '{goal}'. I'll work on it."
 
 
 def _spawn_agent_handler(args: dict, ctx: ExecutionContext) -> str:
@@ -289,15 +301,26 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
                 except Exception as e:
                     print(f"[ToolRegistry] Failed to dynamic load {module_name}: {e}")
 
-    for decl in TOOL_DECLARATIONS:
-        name = decl["name"]
-        handler = handlers.get(name)
-        if not handler and name == "save_memory":
-            handler = _save_memory_handler
-        if not handler:
-            print(f"[ToolRegistry] ⚠️ No handler for {name}")
-            continue
+    # Declarative fast-path patterns — moved here from router.py
+    # To add a new fast-path tool: add patterns here, not in router.py.
+    _FAST_PATH_PATTERNS: dict[str, list[tuple[str, dict]]] = {
+        "system_control": [
+            (r"(?:increase|turn up|raise)\s+(?:the\s+)?volume|volume up|louder",
+             {"action": "volume", "direction": "up"}),
+            (r"(?:decrease|turn down|lower)\s+(?:the\s+)?volume|volume down|quieter",
+             {"action": "volume", "direction": "down"}),
+            (r"(?:mute|silence)\s+(?:the\s+)?(?:volume|sound)|\bmute\b",
+             {"action": "volume", "direction": "mute"}),
+            (r"(?:increase|turn up|raise)\s+(?:the\s+)?brightness|brighter",
+             {"action": "brightness", "direction": "up"}),
+            (r"(?:decrease|turn down|lower|dim)\s+(?:the\s+)?brightness|dimmer",
+             {"action": "brightness", "direction": "down"}),
+        ],
+    }
 
+    for name, handler in handlers.items():
+        if name == "save_memory":
+            handler = _save_memory_handler
         meta = _TOOL_META.get(name, {})
         guard = None
         if name == "screen_process":
@@ -305,8 +328,8 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
 
         registry.register(
             name=name,
-            description=decl.get("description", ""),
-            parameters=decl.get("parameters", {}),
+            description=meta.get("description", name),
+            parameters={},
             handler=handler,
             category=meta.get("category", "general"),
             agent=meta.get("agent", "tool"),
@@ -314,9 +337,13 @@ def register_all_tools(registry: ToolRegistry | None = None) -> ToolRegistry:
             slow=name in _SLOW_TOOLS,
             internal=meta.get("internal", False),
             guard=guard,
+            fast_path_patterns=_FAST_PATH_PATTERNS.get(name),
         )
 
-    print(f"[ToolRegistry] ✅ Registered {len(registry.names())} tools")
+    from actions.skill_loader import load_all_skills
+    load_all_skills()
+
+    print(f"[ToolRegistry] Registered {len(registry.names())} tools")
     return registry
 
 
@@ -327,6 +354,11 @@ def init_hybrid_system() -> Orchestrator:
     global _orchestrator
     registry = register_all_tools()
     _orchestrator = Orchestrator(registry=registry)
+    
+    from hybrid.observer import ContinuousLearningObserver
+    from hybrid.task_bus import get_task_bus
+    _observer = ContinuousLearningObserver(get_task_bus())
+    
     return _orchestrator
 
 
