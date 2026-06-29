@@ -89,10 +89,15 @@ class ToolRegistry:
     def slow_tools(self) -> frozenset[str]:
         return frozenset(t.name for t in self._tools.values() if t.slow)
 
-    def to_gemini_declarations(self) -> list[dict]:
-        """Schema for Gemini Live function_declarations."""
+    def to_gemini_declarations(self, include_custom_skills: bool = False, include_mcp_tools: bool = True) -> list[dict]:
+        """Schema for Gemini function_declarations."""
         decls = []
         for tool in self._tools.values():
+            if not include_custom_skills and tool.category == "custom_skills":
+                continue
+            # Exclude MCP tools if explicitly requested (e.g. for Live voice connection)
+            if not include_mcp_tools and (tool.category == "mcp" or tool.name.startswith("mcp__")):
+                continue
             if tool.internal and tool.name == "save_memory":
                 pass  # still expose save_memory to model
             decls.append({

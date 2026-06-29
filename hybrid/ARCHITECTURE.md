@@ -1,85 +1,86 @@
-# NEO Hybrid Agent Architecture
+# NEO hybrid-agent architecture
 
 ## Design principle
 
-**Adaptive routing** — not every request runs the planner or multiple LLM calls.
+NEO uses adaptive routing. Simple device controls should not pay the cost of
+planning, while multi-step goals retain explicit planning and verification.
 
-| Path | When | LLM calls | Latency target |
-|------|------|-----------|----------------|
-| **Fast** | Volume, brightness, mute (sub-second controls) | 0 extra (regex router) | &lt; 1s |
-| **Direct** | Gemini picks a single tool | 0 extra (live model already understood NL) | Tool time only |
-| **Planned** | Multi-step goals, `agent_task`, complex regex | 1 planner + optional executor | Accuracy over speed |
+| Path | Used for | Extra LLM calls |
+|---|---|---:|
+| Fast | Regex-matched volume and brightness commands | 0 |
+| Direct | A Gemini Live function call to one registered tool | 0 |
+| Planned | Multi-step or multi-goal work | 1 planner call, plus execution as needed |
 
-## Flow diagrams
+## Runtime flow
 
-### Fast path (typed command or matched utterance)
-
-```
-User → Orchestrator.try_fast_path() → Router (regex)
-     → SystemAgent / ToolAgent → ToolRegistry → action handler → Response
-```
-
-### Direct path (voice/text via Gemini Live)
-
-```
-User → Gemini Live (1 session) → function_call
-     → Orchestrator.execute_tool_for_live() → ToolRegistry → Response
+```text
+Voice or text input
+  -> main.NeoLive
+  -> hybrid.Orchestrator
+  -> hybrid.ToolRegistry
+  -> specialized agent
+  -> actions/* handler
+  -> ToolResult
 ```
 
-### Planned path
-
-```
-User → Orchestrator.run_planned_sync()
-     → PlannerAgent (create_plan — 1 LLM)
-     → Parallel independent steps → dependent steps
-     → VerificationAgent → Response
-```
+Fast typed commands enter through `Orchestrator.try_fast_path()`. Gemini Live
+function calls enter through `Orchestrator.execute_tool_for_live()`. Complex
+goals enter through `Orchestrator.run_planned_sync()` and may be split by the
+goal dispatcher.
 
 ## Components
 
-| Module | Role |
-|--------|------|
-| `orchestrator.py` | Entry point, routing, agent dispatch |
-| `router.py` | Fast vs planned classification (no LLM) |
-| `registry.py` | Dynamic tool metadata + handlers |
-| `task_bus.py` | Structured pub/sub between agents |
-| `types.py` | `AgentTask`, `RouteDecision`, `ExecutionContext` |
-| `bootstrap.py` | Registers all tools at startup |
-| `declarations.py` | Gemini function schemas |
-| `agents/*` | Specialized agents (thin wrappers over registry) |
+| Module | Responsibility |
+|---|---|
+| `hybrid/orchestrator.py` | Routing, agent selection, planning and execution |
+| `hybrid/registry.py` | Canonical tool schemas, metadata, guards and handlers |
+| `hybrid/bootstrap.py` | Built-in action registration, dynamic discovery and MCP registration |
+| `hybrid/router.py` | Zero-LLM fast-path classification |
+| `hybrid/task_bus.py` | Structured events shared by agents and observers |
+| `hybrid/types.py` | Tasks, routes, execution context and tool results |
+| `hybrid/agents/*` | Thin role-specific wrappers around the registry |
+| `core/agent_loop.py` | Bounded autonomous tool loop |
+| `core/goal_dispatcher.py` | Independent-goal splitting and parallel dispatch |
+| `core/audio_pipeline.py` | Shared audio primitives and extracted audio pipeline |
+| `core/session_manager.py` | Shared transcript and session-state primitives |
+| `core/tool_runner.py` | Shared tool execution helpers and recovery integration |
 
-## Adding a new tool (no orchestrator edits)
+`main.py` still owns Gemini Live-specific lifecycle and UI coordination. Shared,
+independently testable primitives belong in `core`; live-only behavior stays in
+`NeoLive` until an extracted component has behavioral parity and integration
+tests.
 
-1. Implement `actions/my_tool.py` with `my_tool(parameters, player=None) -> str`.
-2. Add schema to `hybrid/declarations.py` (`TOOL_DECLARATIONS`).
-3. Add handler in `hybrid/bootstrap.py` → `_build_handlers()` and optional `_TOOL_META`.
-4. Restart NEO — `register_all_tools()` picks it up automatically.
+## Adding a built-in tool
 
-Optional: set `"agent": "device"` in `_TOOL_META` for IoT tools handled by `DeviceAgent`.
+1. Implement the action handler under `actions/`.
+2. Add the import and mapping in `hybrid/bootstrap.py::_build_handlers`.
+3. Add its schema and routing metadata to `_TOOL_META`.
+4. Add a guard or fast-path pattern only when needed.
+5. Add focused tests for the action and registry entry.
 
-## Agent responsibilities
+There is no `hybrid/declarations.py`. Gemini function declarations are generated
+from `ToolRegistry.to_gemini_declarations()`.
 
-- **Orchestrator** — context, routing, execution, task state
-- **PlannerAgent** — `create_plan` via LLM call
-- **ToolExecutionAgent** — default registry invoke
-- **SystemAgent** — OS, files, apps, dev tools
-- **ResearchAgent** — web, vision, weather
-- **MemoryAgent** — `save_memory`, contacts
-- **DeviceAgent** — isolated IoT extension point
-- **VerificationAgent** — step result checks before final reply
+## Dynamic action discovery
 
-## Configuration
+An action module not present in the built-in handler map can export:
 
-In `config/api_keys.json`:
+```python
+TOOL_DECLARATION = {
+    "name": "my_tool",
+    "description": "What the tool does",
+    "parameters": {"type": "OBJECT", "properties": {}},
+}
 
-```json
-"hybrid_fast_path": true
+def my_tool(parameters, player=None):
+    return "Done"
 ```
 
-When true, typed commands in the UI try regex fast path before sending to Gemini Live.
+The declaration name must match the module and function name. Dynamic metadata
+is copied into the registry during bootstrap.
 
-## Integration point
+## Private runtime data
 
-`main.py` → `NeoLive._execute_tool` delegates to `get_orchestrator().execute_tool_for_live()`.
-
-Legacy `agent/` package remains for background `TaskQueue` and executor replanning.
+The entire `memory/` directory, `.env`, `mcp.json`, and generated MCP caches are
+machine-local. They must never be committed. Example configuration belongs in
+`.env.example` and `config/api_keys.example.json`.

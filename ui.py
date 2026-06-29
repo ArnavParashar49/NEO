@@ -66,6 +66,41 @@ from ui_theme import (
 from ui_panel import ChatView
 
 
+_INTERNAL_RESPONSE_HEADINGS = (
+    "processing user input",
+    "initiating sequential actions",
+    "sequencing my approach",
+    "analyzing user input",
+    "analysis of user request",
+    "confirming download absence",
+    "reasoning",
+)
+
+
+def _is_internal_model_text(text: str) -> bool:
+    """Detect model meta-analysis that must never be rendered as an answer."""
+    raw = (text or "").strip().lower()
+    if not raw:
+        return False
+    head = raw.lstrip("*#_ `").splitlines()[0].strip("*#_ `:.-")
+    if len(head) >= 3 and any(
+        heading.startswith(head) or head.startswith(heading)
+        for heading in _INTERNAL_RESPONSE_HEADINGS
+    ):
+        return True
+    strong_markers = (
+        "i've analyzed the user's message",
+        "my response incorporates a professional tone",
+        "reflecting my identity",
+        "cross-referenced the system context",
+        "my mind palace",
+        "identity & voice protocols",
+        "i've streamlined the response",
+        "the status check is answered concisely",
+    )
+    return sum(marker in raw for marker in strong_markers) >= 2
+
+
 class LogWidget(QTextEdit):
     _sig = Signal(str)
 
@@ -303,11 +338,13 @@ class CommandBar(QWidget):
 
     file_selected = Signal(str)
     reset_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self._current_file: str | None = None
+        self._is_running = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -370,11 +407,11 @@ class CommandBar(QWidget):
         attach.clicked.connect(self._browse)
         btn_row.addWidget(attach)
 
-        send = QPushButton("↑")
-        send.setFixedSize(32, 32)
-        send.setFont(QFont(_UI_FONT_FAMILY, 14, QFont.Weight.Bold))
-        send.setCursor(Qt.CursorShape.PointingHandCursor)
-        send.setStyleSheet(f"""
+        self.send_btn = QPushButton("↑")
+        self.send_btn.setFixedSize(32, 32)
+        self.send_btn.setFont(QFont(_UI_FONT_FAMILY, 14, QFont.Weight.Bold))
+        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {C.BLUE};
                 color: #ffffff;
@@ -384,11 +421,17 @@ class CommandBar(QWidget):
             QPushButton:hover {{ background: {C.BLUE_L}; }}
             QPushButton:pressed {{ background: {C.BLUE_D}; }}
         """)
-        send.clicked.connect(self.line_edit.returnPressed.emit)
-        btn_row.addWidget(send)
+        self.send_btn.clicked.connect(self._on_send_btn_clicked)
+        btn_row.addWidget(self.send_btn)
 
         pill_layout.addLayout(btn_row)
         root.addWidget(self._pill_frame)
+
+    def _on_send_btn_clicked(self):
+        if self._is_running:
+            self.stop_requested.emit()
+        else:
+            self.line_edit.returnPressed.emit()
 
     @staticmethod
     def _icon_btn_style() -> str:
@@ -653,6 +696,7 @@ class MainWindow(QMainWindow):
     _progress_stop_sig  = Signal()
     _neo_stream_sig    = Signal(str)
     _neo_stream_end_sig = Signal(str, object)
+    _neo_stream_cancel_sig = Signal()
     _tool_block_sig = Signal(str, str)
     panel_collapse_requested = Signal()
 
@@ -672,6 +716,7 @@ class MainWindow(QMainWindow):
         )
 
         self.on_text_command  = None
+        self.on_stop_command  = None
         self.on_force_listen  = None
         self._manual_mute     = False
         self._standby         = False
@@ -708,6 +753,7 @@ class MainWindow(QMainWindow):
         self._tool_block_sig.connect(self._log.append_tool_block)
         self._neo_stream_sig.connect(self._log.update_neo_stream)
         self._neo_stream_end_sig.connect(self._on_neo_stream_end)
+        self._neo_stream_cancel_sig.connect(self._log.cancel_neo_stream)
         self._state_sig.connect(self._apply_state)
         self._progress_start_sig.connect(self._start_search_progress)
         self._progress_stop_sig.connect(self._stop_search_progress)
@@ -788,10 +834,19 @@ class MainWindow(QMainWindow):
         self._cmd = CommandBar()
         self._cmd.file_selected.connect(self._on_file_selected)
         self._cmd.line_edit.returnPressed.connect(self._send)
+        self._cmd.stop_requested.connect(self._on_stop_requested)
         self._cmd.line_edit.textChanged.connect(self._scroll_log_to_bottom)
         lay.addWidget(self._cmd)
 
         return w
+
+    def set_running_state(self, running: bool):
+        self._cmd.set_running_state(running)
+
+    def _on_stop_requested(self):
+        if self.on_stop_command:
+            import threading
+            threading.Thread(target=self.on_stop_command, daemon=True).start()
 
     def _scroll_log_to_bottom(self):
         self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
@@ -1074,6 +1129,8 @@ class _UiDispatcher(QObject):
     hide_camera_preview = Signal()
     set_camera_status = Signal(str)
     request_email = Signal(object)  # holder; show main window + capture typed address
+    show_command_response = Signal(str)
+    show_install_confirmation = Signal(str, str, str)
 
 
 class NeoUI:
@@ -1089,6 +1146,7 @@ class NeoUI:
         self._dispatch = _UiDispatcher()
         self._win = MainWindow(face_path)
         self._siri = None
+        self._spotlight = None
         from ui_screen_border import ScreenBorderManager
         from ui_camera_preview import CameraPreviewManager
 
@@ -1117,6 +1175,14 @@ class NeoUI:
         )
         self._dispatch.request_email.connect(
             self._request_email_main,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._dispatch.show_command_response.connect(
+            self._show_command_response_main,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._dispatch.show_install_confirmation.connect(
+            self._show_install_confirmation_main,
             Qt.ConnectionType.QueuedConnection,
         )
         if self._siri_mode:
@@ -1178,7 +1244,83 @@ class NeoUI:
         self._siri._mute_toggle_cb = self._win._toggle_mute
         self._siri.on_camera_session_ready = self._on_camera_session_ready
         self._siri.req_collapse_camera.connect(self._on_camera_panel_collapse)
+        self._siri.spotlight_toggle_requested.connect(self._toggle_spotlight_overlay)
         self._win.panel_collapse_requested.connect(self._request_siri_collapse)
+
+        from spotlight_overlay import SpotlightAssistantOverlay
+
+        self._spotlight = SpotlightAssistantOverlay(
+            on_submit=self._submit_spotlight_text,
+            can_submit=lambda: self._win.on_text_command is not None,
+            on_closed=self._restore_orb_after_spotlight,
+        )
+
+    def _toggle_spotlight_overlay(self) -> None:
+        if not self._siri or not self._spotlight:
+            return
+        self._siri.req_cancel_hide.emit()
+        opening = not self._spotlight.isVisible()
+        if opening:
+            self._spotlight.set_orb_state(self._win._ui_state)
+        self._spotlight.toggle_from_orb(self._siri.frameGeometry())
+        if opening:
+            self._siri.set_spotlight_suppressed(True)
+
+    def show_command_response(self, text: str) -> None:
+        """Open Spotlight and render a command response on the Qt thread."""
+        if text and text.strip():
+            self._dispatch.show_command_response.emit(text.strip())
+
+    def _show_command_response_main(self, text: str) -> None:
+        if not self._siri or not self._spotlight:
+            self.write_log(f"Neo: {text}")
+            return
+        if not self._spotlight.owns_chat_surface():
+            self._siri.req_cancel_hide.emit()
+            self._spotlight.set_orb_state(self._win._ui_state)
+            self._spotlight.open_from_orb(self._siri.frameGeometry())
+            self._siri.set_spotlight_suppressed(True)
+        self._spotlight.results.clear_messages()
+        self._spotlight.finish_assistant(text)
+
+    def show_install_confirmation(self, title: str, source: str, command: str) -> None:
+        self._dispatch.show_install_confirmation.emit(title, source, command)
+
+    def _show_install_confirmation_main(
+        self, title: str, source: str, command: str
+    ) -> None:
+        if not self._siri or not self._spotlight:
+            self.write_log(f"Neo: Install {title}? Command: {command}")
+            return
+        if not self._spotlight.owns_chat_surface():
+            self._siri.req_cancel_hide.emit()
+            self._spotlight.set_orb_state(self._win._ui_state)
+            self._spotlight.open_from_orb(self._siri.frameGeometry())
+            self._siri.set_spotlight_suppressed(True)
+        self._spotlight.show_install_confirmation(title, source, command)
+
+    def _spotlight_owns_surface(self) -> bool:
+        return bool(self._spotlight and self._spotlight.owns_chat_surface())
+
+    def _restore_orb_after_spotlight(self) -> None:
+        if not self._siri:
+            return
+        self._siri.set_spotlight_suppressed(False)
+        self._siri.show()
+        self._siri.raise_()
+        self._siri.activateWindow()
+        self._siri.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def _submit_spotlight_text(self, text: str) -> bool:
+        """Mirror the user line to history, then use the existing backend callback."""
+        callback = self._win.on_text_command
+        if not callback:
+            return False
+        accepted = callback(text)
+        if accepted is False:
+            return False
+        self._win._log_sig.emit(f"You: {text}")
+        return True
 
     def _begin_camera_session_main(self, camera_index: int, backend: int) -> None:
         """Main thread — start capture immediately, animate panel in parallel."""
@@ -1306,10 +1448,14 @@ class NeoUI:
         self._win.on_force_listen = cb
 
     def set_speaking_active(self, active: bool) -> None:
+        if self._spotlight:
+            self._spotlight.set_orb_speaking(active)
         if self._siri:
             self._siri.set_speaking_active(active)
 
     def siri_wake(self):
+        if self._spotlight_owns_surface():
+            return
         if self._siri:
             self._siri.req_cancel_hide.emit()
             if self._siri.is_expanded():
@@ -1318,10 +1464,14 @@ class NeoUI:
 
     def siri_schedule_hide(self, delay_ms: int = 7000) -> None:
         """Slide orb away after idle (default 7s)."""
+        if self._spotlight_owns_surface():
+            return
         if self._siri and not self._siri.is_expanded():
             self._siri.req_schedule_hide.emit(max(0, int(delay_ms)))
 
     def siri_hide_now(self) -> None:
+        if self._spotlight_owns_surface():
+            return
         if self._siri:
             self._siri.req_schedule_hide.emit(0)
 
@@ -1330,10 +1480,16 @@ class NeoUI:
             self._siri.req_cancel_hide.emit()
 
     def siri_set_prompt(self, text: str):
+        if self._spotlight_owns_surface():
+            if self._spotlight and text.strip():
+                self._spotlight.set_status(text)
+            return
         if self._siri:
             self._siri.req_set_prompt.emit(text)
 
     def siri_blocks_wake(self) -> bool:
+        if self._spotlight_owns_surface():
+            return True
         if self._siri:
             return self._siri.blocks_wake()
         return False
@@ -1375,6 +1531,8 @@ class NeoUI:
 
     def set_state(self, state: str):
         self._win._state_sig.emit(state)
+        if self._spotlight:
+            self._spotlight.set_orb_state(state)
         if self._siri:
             self._siri.req_apply_state.emit(state)
             if state in ("SPEAKING", "THINKING"):
@@ -1386,9 +1544,14 @@ class NeoUI:
         """Update the live NEO line while she is speaking."""
         if not body or not body.strip():
             return
+        if _is_internal_model_text(body):
+            self.cancel_neo_stream()
+            return
         self.stop_log_progress()
         t = body.strip()
         self._win._neo_stream_sig.emit(t)
+        if self._spotlight:
+            self._spotlight.stream_assistant(t)
         if self._siri:
             self._siri.req_stream.emit(t)
 
@@ -1396,10 +1559,21 @@ class NeoUI:
         """Finalize the live line with optional list formatting."""
         if not body or not body.strip():
             return
+        if _is_internal_model_text(body):
+            self.cancel_neo_stream()
+            return
         self.stop_log_progress()
         self._win._neo_stream_end_sig.emit(body.strip(), None)
+        if self._spotlight:
+            self._spotlight.finish_assistant(body.strip())
         if self._siri:
             self._siri.req_stream_end.emit(body.strip(), None)
+
+    def cancel_neo_stream(self) -> None:
+        """Discard pre-tool narration while preserving the final tool result."""
+        self._win._neo_stream_cancel_sig.emit()
+        if self._spotlight:
+            self._spotlight.cancel_assistant_stream()
 
     def write_log(self, text: str):
         """Activity log — only user and NEO lines, shown immediately."""
@@ -1409,10 +1583,15 @@ class NeoUI:
         if tl.startswith("neo:"):
             self.stop_log_progress()
             body = text.split(":", 1)[1].strip()
+            if _is_internal_model_text(body):
+                self.cancel_neo_stream()
+                return
             if self._win._log._neo_stream_active:
                 self.finish_neo_stream(body)
                 return
             text = "Neo: " + body
+            if self._spotlight:
+                self._spotlight.append_message("assistant", body)
         self._win._log_sig.emit(text)
         if self._siri:
             self._siri.req_append_log.emit(text)
@@ -1420,6 +1599,10 @@ class NeoUI:
     def write_log_siri_compact(self, text: str):
         """Update the slim bar prompt only — no log expansion."""
         body = text.split(":", 1)[1].strip() if ":" in text else text.strip()
+        if self._spotlight_owns_surface():
+            if self._spotlight and body:
+                self._spotlight.set_status(body)
+            return
         if self._siri:
             self._siri.req_show_compact.emit()
             self._siri.req_set_prompt.emit(body)
@@ -1430,11 +1613,19 @@ class NeoUI:
         if not text or not text.strip():
             return
         t = text.strip()
+        if self._spotlight_owns_surface():
+            if self._spotlight:
+                self._spotlight.set_status(t)
+            return
         if self._siri:
             self._siri.req_set_activity.emit(t)
 
     def start_log_progress(self, eta_sec: int = 15, label: str = ""):
         self._win._progress_start_sig.emit(eta_sec, label)
+        if self._spotlight_owns_surface():
+            if self._spotlight:
+                self._spotlight.set_status(label or "NEO is working…")
+            return
         if self._siri:
             self._siri.req_progress_start.emit(eta_sec, label or "Working…")
 
@@ -1447,6 +1638,8 @@ class NeoUI:
             self._siri.req_progress_stop.emit()
 
     def push_audio_levels(self, bands: list[float]):
+        if self._spotlight:
+            self._spotlight.push_orb_audio(bands)
         if not self._siri:
             return
         try:

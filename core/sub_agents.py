@@ -57,7 +57,7 @@ BUILT_IN_AGENTS: dict[str, SubAgentSpec] = {
 # --------------------------------------------------------------------------- #
 
 def _build_scoped_registry(spec: SubAgentSpec) -> ToolRegistry:
-    """Create a ToolRegistry containing only the tools this sub-agent needs."""
+    """Create a ToolRegistry containing only the tools this sub-agent needs, plus all MCP tools."""
     global_reg = ToolRegistry.instance()
     scoped = ToolRegistry()
     for tool_name in spec.allowed_tools:
@@ -66,6 +66,12 @@ def _build_scoped_registry(spec: SubAgentSpec) -> ToolRegistry:
             scoped._tools[tool_name] = tool
         else:
             print(f"[SubAgent:{spec.name}] ⚠️ Tool '{tool_name}' not found in global registry")
+            
+    # Dynamically inject all available MCP tools into every sub-agent so they can access external APIs
+    for tool_name, tool in global_reg._tools.items():
+        if tool.category == "mcp" or tool_name.startswith("mcp__"):
+            scoped._tools[tool_name] = tool
+            
     return scoped
 
 

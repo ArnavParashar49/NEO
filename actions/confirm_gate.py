@@ -64,6 +64,13 @@ def clear_pending() -> None:
     _pending = None
 
 
+def peek_pending(action_id: str | None = None) -> dict | None:
+    """Return a copy of a matching staged action without authorizing it."""
+    if not _pending or (action_id is not None and _pending.get("id") != action_id):
+        return None
+    return dict(_pending.get("params") or {})
+
+
 def cancel_message(label: str = "Action") -> str:
     clear_pending()
     return f"CANCELLED: {label} cancelled."

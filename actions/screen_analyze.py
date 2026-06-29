@@ -50,10 +50,14 @@ def screen_analyze(
     from core.llm import ask
     
     params = parameters or {}
+    action = params.get("action", "describe")
     query = params.get("query", "Describe what is on my screen in detail.")
     
     if player:
-        player.write_log("[ScreenAnalyze] Taking screenshot...")
+        if action == "find_element":
+            player.write_log("[ScreenAnalyze] Locating element on screen...")
+        else:
+            player.write_log("[ScreenAnalyze] Taking screenshot...")
         if hasattr(player, "show_screen_border"):
             player.show_screen_border()
             
@@ -69,15 +73,28 @@ def screen_analyze(
         img = Image.open(path)
 
         if player:
-            player.write_log(f"[ScreenAnalyze] Sending to vision model: '{query}'")
+            if action == "find_element":
+                player.write_log(f"[ScreenAnalyze] Finding: '{query}'")
+            else:
+                player.write_log(f"[ScreenAnalyze] Analyzing: '{query}'")
 
         from core.models import VISION
 
-        answer = ask(
-            prompt=query,
-            images=[img],
-            model=VISION,
-        )
+        if action == "find_element":
+            sys_prompt = "You are a spatial UI assistant. The user wants to find an element on the screen. Reply with ONLY the [y, x] bounding box coordinates (normalized 0-1000) for the center of the requested element."
+            answer = ask(
+                prompt=f"Find: {query}",
+                images=[img],
+                model=VISION,
+                system=sys_prompt,
+                temperature=0.0
+            )
+        else:
+            answer = ask(
+                prompt=query,
+                images=[img],
+                model=VISION,
+            )
         
         # Clean up screenshot
         path.unlink(missing_ok=True)

@@ -1,0 +1,7 @@
+# 5 Uses of AI
+
+1. Automation of repetitive tasks.
+2. Advanced data analysis and insights.
+3. Natural Language Processing for communication and translation.
+4. Personalized recommendations and user experiences.
+5. Problem-solving and prediction in complex systems.

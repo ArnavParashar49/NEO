@@ -13,8 +13,26 @@ if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
-    Write-Host "Error: python is not installed. Please install Python 3.10+ first." -ForegroundColor Red
+$PythonCommand = $null
+$PythonPrefix = @()
+if (Get-Command "py" -ErrorAction SilentlyContinue) {
+    foreach ($Version in @("3.12", "3.11")) {
+        & py "-$Version" -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $PythonCommand = "py"
+            $PythonPrefix = @("-$Version")
+            break
+        }
+    }
+}
+if (-not $PythonCommand -and (Get-Command "python" -ErrorAction SilentlyContinue)) {
+    $DetectedVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    if ($DetectedVersion -in @("3.11", "3.12")) {
+        $PythonCommand = "python"
+    }
+}
+if (-not $PythonCommand) {
+    Write-Host "Error: NEO requires Python 3.11 or 3.12." -ForegroundColor Red
     exit 1
 }
 
@@ -30,7 +48,7 @@ if (Test-Path $InstallDir) {
 
 Write-Host "Setting up Python environment..."
 if (-not (Test-Path "$InstallDir\.venv")) {
-    python -m venv .venv
+    & $PythonCommand @PythonPrefix -m venv .venv
 }
 
 $PipPath = "$InstallDir\.venv\Scripts\pip.exe"

@@ -44,8 +44,14 @@ Return ONLY valid JSON:
   "goals": ["task 1", "task 2", "task 3"]
 }
 
-If the request genuinely needs sequential steps (B depends on A's result), set independent: false.
-Otherwise, split into the smallest number of independently-executable goals.
+CRITICAL RULES FOR "independent": false:
+1. If B depends on A's result, set "independent": false.
+2. Watch out for pronouns! If a task says "save IT", "send THEM", "move THE FILE" — it depends on the previous task. Set "independent": false.
+3. **"Open X and do Y" is ALWAYS sequential!** If the user says "open notepad and write...", "open vscode and create...", "open browser and search..." — the second action must happen INSIDE the opened app. These are NOT independent. Set "independent": false.
+4. If any task involves typing, writing, or interacting inside an app that was just opened, set "independent": false.
+5. If any task says "ask it to", "tell it to", "use it to" — it refers to a previously opened app. Set "independent": false.
+
+Only set "independent": false when there is a CLEAR dependency. Unrelated tasks like "check the weather AND play music AND send an email" ARE independent and SHOULD be split.
 Keep each goal specific and self-contained — include all context needed to complete it alone."""
 
 
@@ -60,10 +66,36 @@ def split_goals(user_input: str) -> list[str]:
         return [text]
 
     # Quick pre-check: no conjunction markers → single goal
+    text_lower = text.lower()
     markers = (" and ", " also ", " while you", " separately",
-               "\n1.", "\n2.", "\n3.", "1) ", "2) ", "3) ",
-               " AND ", " ALSO ")
-    if not any(m in text.lower() if m.islower() else m in text for m in markers):
+               "\n1.", "\n2.", "\n3.", "1) ", "2) ", "3) ")
+    if not any(m in text_lower for m in markers):
+        return [text]
+        
+    # Programmatic check for obvious sequential dependencies
+    seq_markers = (
+        # Pronoun references ("do X and Y it/them/that")
+        "and save it", "and move it", "and open it", "and send it", "and email it",
+        "and run it", "and format that", "and delete it", "and close it",
+        "and save the", "and move the", "and open the", "and send the",
+        "and email the", "and run the", "and format the", "and delete the",
+        # Sequential connectors
+        "and then", "after that", "once done", "when done", "next ",
+        # "Open X and do Y inside it" patterns (broad verbs handled by open-check below)
+        "and write", "and type", "and paste", "and put", "and enter", "and input",
+        "and search in", "and navigate", "and go to", "and click",
+        "and use it", "and set up", "and configure", "and edit",
+        # App-referencing pronouns and AI agents
+        "ask it to", "tell it to", "use it to", "ask the",
+        "in it", "inside it", "into it", "on it",
+        "tell the ai", "ask the ai", "tell the ai agent", "ask the ai agent", "tell cursor", "ask cursor"
+    )
+    if any(m in text_lower for m in seq_markers):
+        return [text]
+
+    # If the request contains "open" + another action via "and", it's usually sequential
+    import re
+    if re.search(r'\bopen\b', text_lower) and re.search(r'\band\b', text_lower):
         return [text]
 
     try:
@@ -88,14 +120,16 @@ def split_goals(user_input: str) -> list[str]:
 # Agent assignment                                                            #
 # --------------------------------------------------------------------------- #
 
-# Keyword → agent_type mapping for quick assignment without an extra LLM call
 _GOAL_AGENT_MAP: list[tuple[list[str], str]] = [
+    (["click", "type into", "type in", "ask cursor to", "interact with app", "interact with",
+      "tell the ai", "ask the ai", "ask it to", "tell it to", "on the screen", "visually", "gui", 
+      "ai agent", "cursor"], "gui_worker"),
     (["email", "inbox", "gmail", "mail", "message", "whatsapp", "telegram",
       "contact", "calendar", "schedule", "remind", "event", "note",
       "send message", "send email"], "comms"),
     (["app", "open", "launch", "desktop", "file", "folder", "organize",
       "download", "system", "setting", "volume", "brightness", "mute",
-      "browser", "install", "delete", "move", "copy", "rename"], "system_ops"),
+      "browser", "install", "delete", "move", "copy", "rename", "notepad", "write to file"], "system_ops"),
     (["weather", "flight", "search", "research", "find", "compare",
       "news", "price", "look up", "what is", "who is", "define",
       "youtube", "video", "song", "play", "translate"], "researcher"),
@@ -106,14 +140,16 @@ _GOAL_AGENT_MAP: list[tuple[list[str], str]] = [
 
 
 def assign_agent(goal: str) -> str:
-    """Pick the best agent type for a goal using keyword matching.
+    """Pick the best agent type for a goal using exact word/phrase matching.
 
     Falls back to 'researcher' as the default (most general-purpose).
     """
+    import re
     goal_lower = goal.lower()
     for keywords, agent_type in _GOAL_AGENT_MAP:
-        if any(kw in goal_lower for kw in keywords):
-            return agent_type
+        for kw in keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', goal_lower):
+                return agent_type
     return "researcher"
 
 

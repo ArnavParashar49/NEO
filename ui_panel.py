@@ -38,48 +38,6 @@ def _font(size: int, bold: bool = False) -> QFont:
     return f
 
 
-def _format_prose_html(text: str) -> str:
-    """Rich text: bold, inline code, numbered lines."""
-
-    def _inline_format(raw: str) -> str:
-        codes: list[str] = []
-
-        def _stash_code(m: re.Match) -> str:
-            codes.append(m.group(1))
-            return f"\x00C{len(codes) - 1}\x00"
-
-        s = re.sub(r"`([^`]+)`", _stash_code, raw)
-        s = html.escape(s)
-        s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
-        for i, code in enumerate(codes):
-            chip = html.escape(code)
-            s = s.replace(
-                f"\x00C{i}\x00",
-                f'<span style="font-family:Consolas,Menlo,monospace;'
-                f"background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:4px;"
-                f'">{chip}</span>',
-            )
-        return s
-
-    parts: list[str] = []
-    for line in text.split("\n"):
-        raw = line.strip()
-        if not raw:
-            parts.append("<br/>")
-            continue
-        fmt = _inline_format(raw)
-        if raw.endswith(":") and len(raw) < 48 and not raw[0].isdigit():
-            parts.append(f'<p style="margin:10px 0 4px 0;"><b>{fmt}</b></p>')
-        elif re.match(r"^\d+\.\s", raw):
-            num = raw.split(".", 1)[0]
-            body = _inline_format(raw.split(".", 1)[1].strip()) if "." in raw else fmt
-            parts.append(
-                f'<p style="margin:4px 0;">'
-                f'<span style="color:{C.BLUE};font-weight:600;">{num}.</span> {body}</p>'
-            )
-        else:
-            parts.append(f'<p style="margin:2px 0 6px 0;">{fmt}</p>')
-    return "".join(parts)
 
 
 class _DateStamp(QWidget):
@@ -158,6 +116,7 @@ class _AiMessage(QWidget):
             lab = QLabel(text)
             lab.setWordWrap(True)
             lab.setFont(_font(11))
+            lab.setTextFormat(Qt.TextFormat.MarkdownText)
             lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             lab.setStyleSheet(
                 f"color: {C.AI}; background: transparent; line-height: 1.45;"
@@ -192,14 +151,14 @@ class _AiMessage(QWidget):
             lab = QLabel()
             lab.setWordWrap(True)
             lab.setFont(_font(11))
-            lab.setTextFormat(Qt.TextFormat.RichText)
+            lab.setTextFormat(Qt.TextFormat.MarkdownText)
             lab.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
             lab.setStyleSheet(
                 f"color: {C.AI}; background: transparent; line-height: 1.45;"
             )
-            lab.setText(_format_prose_html(combined))
+            lab.setText(combined)
             self._root.addWidget(lab)
             self._prose_label = lab
 
@@ -463,6 +422,16 @@ class ChatView(QScrollArea):
         if text:
             self._save_history("model", text)
         QTimer.singleShot(50, self._scroll_bottom)
+
+    def cancel_neo_stream(self) -> None:
+        """Remove provisional model narration when the model proceeds to a tool call."""
+        if self._stream_msg is None:
+            return
+        parent = self._stream_msg.parentWidget()
+        if parent:
+            self._lay.removeWidget(parent)
+            parent.deleteLater()
+        self._stream_msg = None
 
     def clear_view(self) -> None:
         self._stream_msg = None

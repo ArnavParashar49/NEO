@@ -1,4 +1,4 @@
-"""Download files: app installs via Google+browser click, direct URLs, or CLI (yt-dlp/curl)."""
+"""Confirmed terminal-first downloads and installs with browser fallback."""
 
 from __future__ import annotations
 
@@ -37,6 +37,82 @@ _YT_RE = re.compile(
     r"(?:youtube\.com/watch|youtu\.be/|youtube\.com/shorts/)",
     re.I,
 )
+_TERMINAL_ACTION_ID = "download_terminal_command"
+
+
+def _serialize_terminal_plan(plan, *, query: str, kind: str) -> dict:
+    return {
+        "executable": plan.executable,
+        "args": list(plan.args),
+        "display": plan.display,
+        "cwd": str(plan.cwd) if plan.cwd else "",
+        "browser_fallback": plan.browser_fallback,
+        "query": query,
+        "kind": kind,
+        "source": plan.source,
+    }
+
+
+def _stage_terminal_plan(plan, *, query: str, kind: str) -> str:
+    from actions import confirm_gate as cg
+
+    staged = _serialize_terminal_plan(plan, query=query, kind=kind)
+    confirmation = cg.needs_confirm(
+        _TERMINAL_ACTION_ID,
+        f"Verified {kind} command is ready.",
+        staged,
+        ask=f"Install {query}?",
+    )
+    card = json.dumps(
+        {
+            "title": query,
+            "source": plan.source,
+            "command": plan.display,
+        },
+        ensure_ascii=False,
+    )
+    return f"{confirmation}\nINSTALL_CONFIRMATION_JSON:{card}"
+
+
+def _handle_terminal_confirmation(params: dict) -> str | None:
+    """Handle yes/no for a staged command; return None for an initial request."""
+    from actions import confirm_gate as cg
+    from actions.terminal_download import TerminalPlan, run_plan
+
+    if not (cg.as_bool(params.get("confirm")) or cg.as_bool(params.get("cancel"))):
+        return None
+
+    staged = cg.peek_pending(_TERMINAL_ACTION_ID)
+    proceed, stored, error = cg.consume_confirmed(params, _TERMINAL_ACTION_ID)
+    if error:
+        if staged and cg.as_bool(params.get("cancel")):
+            command = staged.get("display", "")
+            return (
+                "CANCELLED_COMMAND: Nothing was run. Show this command on screen "
+                f"without reading it aloud:\n```shell\n{command}\n```"
+            )
+        return error
+    if not proceed or not stored:
+        return "FAILED: No matching terminal command is awaiting confirmation."
+
+    plan = TerminalPlan(
+        executable=str(stored.get("executable", "")),
+        args=tuple(str(arg) for arg in stored.get("args", [])),
+        display=str(stored.get("display", "")),
+        cwd=Path(stored["cwd"]) if stored.get("cwd") else None,
+        browser_fallback=bool(stored.get("browser_fallback")),
+        source=str(stored.get("source") or "Terminal"),
+    )
+    ok, output = run_plan(plan)
+    if ok:
+        detail = f" {output}" if output else ""
+        return f"SUCCESS: Ran `{plan.display}`.{detail}"
+    if plan.browser_fallback and stored.get("query"):
+        fallback = _browser_app_download(str(stored["query"]))
+        return (
+            f"Terminal command failed: {output} Browser fallback: {fallback}"
+        )
+    return f"FAILED: `{plan.display}` — {output}"
 
 
 def _base_dir() -> Path:
@@ -500,35 +576,6 @@ def _download_from_search(query: str, dest: str = "downloads") -> str:
     return _browser_app_download(query)
 
 
-def _download_cli(tool: str, args: list[str], dest: str = "downloads") -> str:
-    tool = (tool or "").strip().lower()
-    allow = {"curl", "wget", "yt-dlp", "youtube-dl"}
-    if tool not in allow:
-        return f"FAILED: CLI tool '{tool}' not allowed. Use: {', '.join(sorted(allow))}."
-
-    binary = _which(tool)
-    if not binary:
-        return f"FAILED: {tool} not found on PATH."
-
-    if not args:
-        return f"FAILED: Provide args for {tool} (e.g. URL)."
-
-    dest_dir = _downloads_dir(dest)
-    cwd = str(dest_dir)
-    cmd = [binary, *args]
-    try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600)
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "").strip()[:300]
-            return f"FAILED: {tool} exit {r.returncode} — {err}"
-        out = (r.stdout or r.stderr or "").strip()[:200]
-        return f"Ran {tool} in {dest_dir}." + (f" {out}" if out else "")
-    except subprocess.TimeoutExpired:
-        return f"FAILED: {tool} timed out."
-    except Exception as e:
-        return f"FAILED: {tool} — {e}"
-
-
 def download_control(
     parameters: dict | None = None,
     response=None,
@@ -545,8 +592,32 @@ def download_control(
         player.write_log(f"[download] {action} {query or url}")
 
     try:
+        confirmation_result = _handle_terminal_confirmation(params)
+        if confirmation_result is not None:
+            return confirmation_result
+
+        if action in ("install", "package", "terminal"):
+            from actions.terminal_download import resolve_install_plan
+
+            if not query:
+                return "FAILED: What should I install?"
+            plan = resolve_install_plan(query)
+            if plan:
+                return _stage_terminal_plan(plan, query=query, kind="installation")
+            return _browser_app_download(query)
+
         if action in ("url", "link"):
-            return _download_url(url or query, dest)
+            target = url or query
+            if not _is_safe_url(target):
+                return "FAILED: Provide a safe HTTP or HTTPS download URL."
+            from actions.terminal_download import resolve_url_download_plan
+
+            dest_dir = _downloads_dir(dest)
+            filename = _filename_from_url(target) or "download.bin"
+            plan = resolve_url_download_plan(target, dest_dir, filename)
+            if plan:
+                return _stage_terminal_plan(plan, query=target, kind="download")
+            return _download_url(target, dest)
 
         if action in ("search", "google", "find", "browser", "app"):
             return _browser_app_download(query or url)
@@ -560,14 +631,18 @@ def download_control(
             return _download_ytdlp(target, dest_dir, is_search=is_search)
 
         if action == "cli":
+            from actions.terminal_download import resolve_cli_plan
+
             raw_args = params.get("args") or params.get("arguments") or []
             if isinstance(raw_args, str):
-                raw_args = raw_args.split()
-            return _download_cli(
-                params.get("tool") or params.get("cli") or "curl",
-                list(raw_args),
-                dest,
-            )
+                import shlex
+
+                raw_args = shlex.split(raw_args, posix=_OS != "Windows")
+            tool = params.get("tool") or params.get("cli") or "curl"
+            plan = resolve_cli_plan(tool, list(raw_args), _downloads_dir(dest))
+            if not plan:
+                return "FAILED: Use an installed allowlisted CLI: curl, wget, or yt-dlp."
+            return _stage_terminal_plan(plan, query=query or url, kind="download")
 
         if action == "auto":
             if url:

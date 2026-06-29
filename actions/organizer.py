@@ -72,7 +72,7 @@ def _preview_organize(path: str, mode: str = "by_type") -> str:
 
     lines = [f"Would move {len(moves)} file(s) in {folder.name} ({mode}):"]
     for src, dst in moves[:12]:
-        lines.append(f"  {src.name} → {dst.parent.name}/")
+        lines.append(f"  {src.name} -> {dst.parent.name}/")
     if len(moves) > 12:
         lines.append(f"  ... and {len(moves) - 12} more")
     return "\n".join(lines)
@@ -98,7 +98,7 @@ def _run_organize(path: str, mode: str = "by_type") -> str:
             skipped.append(src.name)
         try:
             shutil.move(str(src), str(final))
-            moved.append(f"{src.name} → {final.parent.name}/")
+            moved.append(f"{src.name} -> {final.parent.name}/")
         except Exception as e:
             skipped.append(f"{src.name} ({e})")
 
@@ -181,7 +181,7 @@ def _preview_rename(path: str, params: dict) -> str:
 
     lines = [f"Would rename {len(renames)} file(s) in {folder.name}:"]
     for src, new_name in renames[:12]:
-        lines.append(f"  {src.name} → {new_name}")
+        lines.append(f"  {src.name} -> {new_name}")
     if len(renames) > 12:
         lines.append(f"  ... and {len(renames) - 12} more")
     return "\n".join(lines)
@@ -214,7 +214,7 @@ def _run_bulk_rename(path: str, params: dict) -> str:
             continue
         try:
             src.rename(target)
-            done.append(f"{src.name} → {new_name}")
+            done.append(f"{src.name} -> {new_name}")
         except Exception as e:
             skipped.append(f"{src.name} ({e})")
 

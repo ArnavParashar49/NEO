@@ -178,10 +178,20 @@ def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
                 return ""
         return text[:max_chars]
 
-    if action in ("summarize", "extract_text", "translate_hint", "analyze", "reformat"):
+    if action in ("summarize", "extract_text", "translate_hint", "analyze", "reformat", "memorize"):
         text = _extract_pdf_text()
         if not text.strip():
             return "Could not extract text from PDF (may be scanned/image-based)."
+
+        if action == "memorize":
+            try:
+                from core.memory_rag import store_memory
+                chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+                for i, chunk in enumerate(chunks):
+                    store_memory("document", chunk, {"source": path.name, "chunk": i+1})
+                return f"Document '{path.name}' ({len(text)} chars, {len(chunks)} chunks) successfully stored in long-term memory (ChromaDB)."
+            except Exception as e:
+                return f"Failed to store in memory: {e}"
 
         if action == "extract_text":
             out = _output_path(path, "text", ".txt")
@@ -252,6 +262,16 @@ def _process_text_doc(path: Path, file_type: str, action: str,
     content = _read_content()
     if not content.strip():
         return "File appears to be empty."
+
+    if action == "memorize":
+        try:
+            from core.memory_rag import store_memory
+            chunks = [content[i:i+4000] for i in range(0, len(content), 4000)]
+            for i, chunk in enumerate(chunks):
+                store_memory("document", chunk, {"source": path.name, "chunk": i+1})
+            return f"Document '{path.name}' ({len(content)} chars, {len(chunks)} chunks) successfully stored in long-term memory (ChromaDB)."
+        except Exception as e:
+            return f"Failed to store in memory: {e}"
 
     if action == "word_count":
         words = len(content.split())

@@ -29,3 +29,13 @@ chromadb
 pyobjc-framework-Cocoa; sys_platform == 'darwin'
 exa-py==2.14.0
 
+
+# Added by NEO
+pdfplumber
+pypdf2
+python-docx
+markdown-it-py>=3.0,<5
+pydub
+pandas
+openpyxl
+uiautomation

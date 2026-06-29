@@ -39,7 +39,7 @@ RESEARCH = _model("NEO_MODEL_RESEARCH", _KIMI_K2)
 FILE_ANALYSIS = _model("NEO_MODEL_FILE", _GEMINI_FLASH)
 VISION = _model("NEO_MODEL_VISION", _GEMINI_FLASH)
 FAST_UTILITY = _model("NEO_MODEL_FAST", _GEMINI_LITE)
-DEEP_ANALYSIS = _model("NEO_MODEL_DEEP", "openrouter/anthropic/claude-sonnet-4-20250514")
+DEEP_ANALYSIS = _model("NEO_MODEL_DEEP", "groq/llama-3.3-70b-versatile")
 
 # Gemini Live voice session (google.genai model id, not litellm prefix)
 VOICE_LIVE = _model(
@@ -50,10 +50,10 @@ VOICE_LIVE = _model(
 # Grounded web search requires Gemini + google_search tool
 WEB_SEARCH_GROUNDED = _model("NEO_MODEL_WEB_SEARCH", _GEMINI_FLASH)
 
-# ── Fallback chain (OpenRouter → CometAPI) ───────────────────────────────────
-FALLBACK_OPENROUTER = _model(
-    "NEO_MODEL_FALLBACK_OPENROUTER",
-    "openrouter/google/gemini-2.5-flash",
+# ── Fallback chain (Groq → CometAPI) ───────────────────────────────────
+FALLBACK_GROQ = _model(
+    "NEO_MODEL_FALLBACK_GROQ",
+    "groq/llama-3.3-70b-versatile",
 )
 FALLBACK_COMETAPI = _model(
     "NEO_MODEL_FALLBACK_COMETAPI",
@@ -62,7 +62,7 @@ FALLBACK_COMETAPI = _model(
 
 FALLBACK_CHAIN: tuple[str, ...] = (
     PRIMARY,
-    FALLBACK_OPENROUTER,
+    FALLBACK_GROQ,
     FALLBACK_COMETAPI,
 )
 

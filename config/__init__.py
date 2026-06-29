@@ -61,7 +61,7 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 DEFAULT_SEARCH_ENGINE = (
-    os.getenv("NEO_DEFAULT_SEARCH_ENGINE") or "duckduckgo"
+    os.getenv("NEO_DEFAULT_SEARCH_ENGINE") or "google"
 ).strip().lower()
 
 SEARCH_ENGINE_BASES: dict[str, str] = {
@@ -73,7 +73,7 @@ SEARCH_ENGINE_BASES: dict[str, str] = {
 
 
 def search_engine_url(query: str, engine: str | None = None, *, images: bool = False) -> str:
-    """Build a search URL for the given query (default engine: DuckDuckGo)."""
+    """Build a search URL for the given query (default engine: Google)."""
     from urllib.parse import quote_plus
 
     eng = (engine or DEFAULT_SEARCH_ENGINE).lower()

@@ -106,8 +106,8 @@ def empty_trash() -> str:
                 _run_cmd(["rm", "-rf", f"{p}/*"])
     return "Trash emptied."
 
-def computer_settings(args: dict, response=None) -> str:
-    action = args.get("action", "").lower().replace(" ", "_")
+def computer_settings(parameters: dict, response=None, player=None, session_memory=None) -> str:
+    action = parameters.get("action", "").lower().replace(" ", "_")
     
     if action == "lock_screen": return lock_screen()
     if action == "sleep_display": return sleep_display()

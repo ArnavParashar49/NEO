@@ -10,6 +10,8 @@ _SYSTEM_TOOLS = frozenset({
     "open_app",
     "system_control",
     "computer_settings",
+    "window_control",
+    "project_starter",
     "desktop_control",
     "computer_control",
     "file_controller",

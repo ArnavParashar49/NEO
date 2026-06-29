@@ -10,9 +10,9 @@ venv/
 config/api_keys.json
 
 # Personal memory data (local only — names, contacts, remembered faces)
-memory/long_term.json
-memory/face_registry.json
-memory/face_db/
+memory/
+mcp.json
+mcp_cache.json
 
 # OS / IDE
 .DS_Store
@@ -23,6 +23,7 @@ memory/face_db/
 # Runtime caches
 cache/
 *.log
+@AutomationLog.txt
 
 # macOS app bundle (built locally via scripts/build_macos_app.sh)
 ARIA.app/
@@ -31,4 +32,3 @@ ARIA.app/
 yolov8n.pt
 *.pt
 *.onnx
-

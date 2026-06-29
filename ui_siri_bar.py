@@ -84,47 +84,15 @@ def _is_center_corner(corner: str) -> bool:
 
 
 def _load_siri_bar_layout() -> dict:
-    layout = {
-        "corner": _DEFAULT_CORNER,
+    return {
+        "corner": "top-center",
         "margin_x": _DEFAULT_MARGIN_X,
         "margin_y": _DEFAULT_MARGIN_Y,
     }
-    if not _CONFIG_FILE.exists():
-        return layout
-    try:
-        raw = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-        cfg = raw.get("siri_bar") or {}
-        if isinstance(cfg, str):
-            corner = cfg.lower().strip()
-            if corner in _VALID_CORNERS:
-                layout["corner"] = corner
-        elif isinstance(cfg, dict):
-            corner = str(cfg.get("corner", layout["corner"])).lower().strip()
-            if corner in _VALID_CORNERS:
-                layout["corner"] = corner
-            layout["margin_x"] = max(0, int(cfg.get("margin_x", layout["margin_x"])))
-            layout["margin_y"] = max(0, int(cfg.get("margin_y", layout["margin_y"])))
-    except Exception:
-        pass
-    return layout
 
 
 def _save_siri_bar_layout(layout: dict) -> None:
-    try:
-        data: dict = {}
-        if _CONFIG_FILE.exists():
-            data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-        data["siri_bar"] = {
-            "corner": layout.get("corner", _DEFAULT_CORNER),
-            "margin_x": int(layout.get("margin_x", _DEFAULT_MARGIN_X)),
-            "margin_y": int(layout.get("margin_y", _DEFAULT_MARGIN_Y)),
-        }
-        _CONFIG_FILE.write_text(
-            json.dumps(data, indent=4, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    except Exception as exc:
-        print(f"[SiriBar] Could not save position: {exc}")
+    pass  # Layout is hardcoded to top-center
 
 
 class SiriOrbSlot(QWidget):
@@ -178,7 +146,7 @@ class SiriOrbSlot(QWidget):
 class SiriBarWindow(QWidget):
     """Frameless circular orb overlay."""
 
-    open_full_window_requested = Signal()
+    spotlight_toggle_requested = Signal()
 
     req_slide_in = Signal()
     req_slide_out = Signal()
@@ -216,6 +184,7 @@ class SiriBarWindow(QWidget):
         self._pending_camera: tuple[int, int] | None = None
         self.on_camera_session_ready = None  # callable(index, backend)
         self._speaking_active = False
+        self._spotlight_suppressed = False
         self._keep_orb_docked = False
         self._animating = False
         self._visible_target = False
@@ -871,11 +840,20 @@ class SiriBarWindow(QWidget):
         if active:
             self.cancel_scheduled_hide()
 
+    def set_spotlight_suppressed(self, suppressed: bool) -> None:
+        """Prevent all compact-orb show paths while Spotlight owns the UI."""
+        self._spotlight_suppressed = bool(suppressed)
+        if suppressed:
+            self.cancel_scheduled_hide()
+            self.hide()
+
     def is_overlay_visible(self) -> bool:
         return self.isVisible() and self._visible_target
 
     def show_compact(self, *, fast: bool = True):
         """Slide in the orb overlay (never tears down an open panel)."""
+        if self._spotlight_suppressed:
+            return
         self._hide_timer.stop()
         if self._expanded:
             self.cancel_scheduled_hide()
@@ -905,6 +883,8 @@ class SiriBarWindow(QWidget):
         self._prompt_sig.emit(text)
 
     def slide_in(self):
+        if self._spotlight_suppressed:
+            return
         self._hide_timer.stop()
         self._keep_orb_docked = False
         self._visible_target = True
@@ -1294,28 +1274,12 @@ class SiriBarWindow(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = True
-            self._drag_moved = False
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self._docked = False
             if self._anim:
                 self._anim.stop()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if (
-            self._dragging
-            and self._drag_offset is not None
-            and event.buttons() & Qt.MouseButton.LeftButton
-        ):
-            scr = self._screen_rect()
-            g = self.geometry()
-            pos = event.globalPosition().toPoint() - self._drag_offset
-            x = max(scr.left(), min(pos.x(), scr.right() - g.width()))
-            y = max(scr.top(), min(pos.y(), scr.bottom() - g.height()))
-            if abs(x - g.x()) > 2 or abs(y - g.y()) > 2:
-                self._drag_moved = True
-            self.move(x, y)
         super().mouseMoveEvent(event)
 
     def enterEvent(self, event):
@@ -1327,20 +1291,15 @@ class SiriBarWindow(QWidget):
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
-            self._dragging = False
-            self._drag_offset = None
-            if self._drag_moved:
-                self._persist_layout_from_geometry()
-                self._docked = True
-            elif not self._expanded:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self._expanded:
                 self._spin_click_timer.start(220)   # single click → spin
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self._expanded:
             self._spin_click_timer.stop()   # don't spin on double-click
-            self.toggle_expand()
+            self.spotlight_toggle_requested.emit()
             event.accept()
             return
         super().mouseDoubleClickEvent(event)

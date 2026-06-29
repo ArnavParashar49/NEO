@@ -80,7 +80,7 @@ def _shortcuts() -> dict[str, Path]:
         "music":      _get_music(),
         "videos":     _get_videos(),
         "home":       Path.home(),
-        "screenshots": _get_desktop(),
+        "screenshots": _get_pictures() / "Screenshots",
     }
 
 
@@ -168,6 +168,18 @@ def _find_in_dir(directory: Path, name: str) -> Path | None:
             if item.name.lower() == lower or item.name.lower().startswith(stem):
                 return item
 
+    # Recursive fallback (limited to avoid hanging on massive folders)
+    # We only rglob if the folder is not the absolute home root to prevent massive latency
+    if directory != Path.home():
+        try:
+            for i, p in enumerate(directory.rglob(f"*{name}*")):
+                if p.is_file() and not p.name.startswith("."):
+                    return p
+                if i > 2000: # break after 2000 checks
+                    break
+        except PermissionError:
+            pass
+            
     return None
 
 

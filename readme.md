@@ -76,7 +76,8 @@ iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercon
 
 ## ⚙️ Configuration
 
-Everything lives in `config/api_keys.json` (gitignored — your key never leaves your machine):
+Secrets live in `.env` (gitignored), while non-secret preferences are stored in
+the platform user-config directory. Start by copying `.env.example` to `.env`.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -93,7 +94,7 @@ Everything lives in `config/api_keys.json` (gitignored — your key never leaves
 
 ## 🔒 Privacy
 
-- Your API key and personal memory (`config/api_keys.json`, `memory/`) are **gitignored** and stay strictly local.
+- API keys (`.env`), MCP configuration, caches, and the entire `memory/` directory are **gitignored** and stay local.
 - Wake-word listening is **fully on-device** — audio is only sent to Gemini *after* you actively summon NEO.
 - Vision runs locally (YOLOv8 + DeepFace). See **[VISION_PRIVACY.md](VISION_PRIVACY.md)** for what's processed and stored.
 
@@ -108,6 +109,23 @@ Everything lives in `config/api_keys.json` (gitignored — your key never leaves
 | **Microphone** | Required for voice interaction |
 | **Webcam** | Optional, for vision features |
 | **API key** | Free Gemini key ([aistudio.google.com](https://aistudio.google.com)) |
+
+### Development setup
+
+Use Python 3.12 (Python 3.11 is also supported). The repository includes a
+`.python-version` file so compatible version managers select 3.12 automatically.
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
+
+Runtime dependencies live in `requirements.txt`; test, lint, type-checking, and
+pre-commit tools live in `requirements-dev.txt`.
 
 > Some OS-specific packages aren't bundled to keep `requirements.txt` light. If you encounter a `ModuleNotFoundError`, install that specific package for your platform with `pip install <module>`.
 

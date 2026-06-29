@@ -110,7 +110,17 @@ def run_agent(
         except ImportError:
             memory_context = ""
             
-        full_system = AGENT_SYSTEM_PROMPT
+        import platform, getpass, datetime
+        sys_ctx = f"\n\n[SYSTEM CONTEXT]\nOperating System: {platform.system()} {platform.release()}\nOS Account Name: {getpass.getuser()}\nCurrent Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        # Inject memory context if available
+        try:
+            from core.memory_graph import format_graph_for_prompt
+            sys_ctx += format_graph_for_prompt()
+        except Exception:
+            pass
+        
+        full_system = AGENT_SYSTEM_PROMPT + sys_ctx
         if memory_context:
             full_system += f"\n\n{memory_context}"
 
@@ -127,7 +137,12 @@ def run_agent(
         turn = session.step()
 
         if not turn.calls:
-            return AgentResult(answer=(turn.text or "").strip(), steps=steps, stopped_reason="done")
+            res = AgentResult(answer=(turn.text or "").strip(), steps=steps, stopped_reason="done")
+            try:
+                from hybrid.task_bus import get_task_bus
+                get_task_bus().emit("task.completed", {"goal": goal, "steps": steps, "result": res})
+            except Exception: pass
+            return res
 
         for name, args in turn.calls:
             args = dict(args or {})
@@ -136,11 +151,16 @@ def run_agent(
             sig = (name, repr(sorted(args.items())))
             call_counts[sig] = call_counts.get(sig, 0) + 1
             if call_counts[sig] > 3:
-                return AgentResult(
+                res = AgentResult(
                     answer=f"Stopping: '{name}' was called repeatedly without progress.",
                     steps=steps,
                     stopped_reason="loop_guard",
                 )
+                try:
+                    from hybrid.task_bus import get_task_bus
+                    get_task_bus().emit("task.completed", {"goal": goal, "steps": steps, "result": res})
+                except Exception: pass
+                return res
 
             result = registry.invoke(name, args, ctx)
             step = Step(tool=name, args=args, result=result.text, ok=result.ok)
@@ -150,7 +170,12 @@ def run_agent(
 
             # Human-in-the-loop: never auto-confirm destructive actions.
             if result.text.strip().startswith(_STOP_PREFIXES):
-                return AgentResult(answer=result.text, steps=steps, stopped_reason="needs_user")
+                res = AgentResult(answer=result.text, steps=steps, stopped_reason="needs_user")
+                try:
+                    from hybrid.task_bus import get_task_bus
+                    get_task_bus().emit("task.completed", {"goal": goal, "steps": steps, "result": res})
+                except Exception: pass
+                return res
 
             session.add_tool_result(name, result.text)
 
@@ -159,7 +184,15 @@ def run_agent(
         final = session.finalize()
     except Exception:
         final = "Reached the action limit before fully completing the goal."
-    return AgentResult(answer=final, steps=steps, stopped_reason="max_steps")
+    res = AgentResult(answer=final, steps=steps, stopped_reason="max_steps")
+    
+    try:
+        from hybrid.task_bus import get_task_bus
+        get_task_bus().emit("task.completed", {"goal": goal, "steps": steps, "result": res})
+    except Exception:
+        pass
+        
+    return res
 
 
 # --------------------------------------------------------------------------- #
@@ -194,40 +227,43 @@ class GeminiToolSession:
     def _generate(self, *, with_tools: bool = True):
         import time
         import litellm
-        from core.llm import _get_api_key_for_model
-        
-        kwargs = {
-            "model": self._model,
-            "messages": self._messages,
-        }
-        
-        # litellm expects gemini models to have gemini/ prefix
-        if kwargs["model"].startswith("gemini-"):
-            kwargs["model"] = f"gemini/{kwargs['model']}"
-            
-        api_key = _get_api_key_for_model(kwargs["model"])
-        if api_key:
-            kwargs["api_key"] = api_key
-            
+        from core.llm import get_provider_router, _get_api_key_for_model, _route_provider
+
+        # Normalize the primary model name (litellm needs gemini/ prefix)
+        primary = self._model
+        if primary.startswith("gemini-"):
+            primary = f"gemini/{primary}"
+
+        chain = get_provider_router().get_fallback_chain(primary)
+
+        base_kwargs: dict = {"messages": self._messages}
         if with_tools and self._tools:
-            kwargs["tools"] = self._tools
-            
+            base_kwargs["tools"] = self._tools
         if self._temperature is not None:
-            kwargs["temperature"] = self._temperature
+            base_kwargs["temperature"] = self._temperature
 
         last: Exception | None = None
-        for attempt in range(3):
+        for model in chain:
+            kwargs = {**base_kwargs, "model": model}
+            # Use _route_provider to correctly resolve cometapi/kimi/groq/openrouter keys
+            try:
+                routed_model, api_key, api_base = _route_provider(model)
+                kwargs["model"] = routed_model
+                if api_key:
+                    kwargs["api_key"] = api_key
+                if api_base:
+                    kwargs["api_base"] = api_base
+            except Exception:
+                # If routing fails, fall back to simple key lookup
+                api_key = _get_api_key_for_model(model)
+                if api_key:
+                    kwargs["api_key"] = api_key
             try:
                 return litellm.completion(**kwargs)
             except Exception as e:
                 last = e
-                msg = str(e)
-                if not any(code in msg for code in ("429", "503", "500", "UNAVAILABLE")):
-                    raise
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
+                time.sleep(1)  # Brief pause before trying next model
         raise last
-
     def step(self) -> Turn:
         resp = self._generate()
         msg = resp.choices[0].message
@@ -273,6 +309,12 @@ class GeminiToolSession:
                     break
                     
         import json
+        
+        # Inject reflection hint if result indicates failure or empty findings
+        lower_text = text.lower()
+        if "not found" in lower_text or ("no " in lower_text and " found" in lower_text) or "error" in lower_text or "failed" in lower_text or "access denied" in lower_text:
+            text += "\n[SYSTEM HINT: The previous action failed or yielded no results. Do NOT repeat the exact same action. Think step-by-step about why it failed. Try a broader search, a different path, or an alternative approach.]"
+
         self._messages.append({
             "role": "tool",
             "tool_call_id": str(tool_call_id),

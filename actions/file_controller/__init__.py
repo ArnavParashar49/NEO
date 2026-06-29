@@ -39,22 +39,22 @@ def file_controller(
         player.write_log(f"[file] {action} {name or path}")
 
     try:
-        if action == "list":
+        if action in ("list", "ls", "dir", "list_files"):
             return list_files(path)
 
-        elif action == "create_file":
+        elif action in ("create_file", "create", "new"):
             return create_file(path, name=name, content=params.get("content", ""))
 
-        elif action == "create_folder":
+        elif action in ("create_folder", "mkdir", "new_folder", "create_dir"):
             return create_folder(path, name=name)
 
-        elif action == "delete":
+        elif action in ("delete", "remove", "rm", "del"):
             return _handle_delete_with_confirm(params, path, name)
 
-        elif action == "merge_folders":
+        elif action in ("merge_folders", "merge"):
             return _handle_merge_with_confirm(params)
 
-        elif action == "distribute_files":
+        elif action in ("distribute_files", "distribute"):
             dests = _parse_destinations(params)
             raw_count = params.get("count")
             if len(dests) == 1 and raw_count is None:
@@ -67,7 +67,7 @@ def file_controller(
                 count=count,
             )
 
-        elif action == "move_all":
+        elif action in ("move_all", "move_all_files"):
             dest = (params.get("destination") or "").strip()
             if not dest:
                 return "FAILED: destination required for move_all."
@@ -77,32 +77,32 @@ def file_controller(
                 include_folders=bool(params.get("include_folders", False)),
             )
 
-        elif action == "move":
+        elif action in ("move", "mv"):
             return move_file(
                 destination=params.get("destination", ""),
                 params=params,
             )
 
-        elif action == "copy":
+        elif action in ("copy", "cp"):
             return copy_file(
                 destination=params.get("destination", ""),
                 params=params,
             )
 
-        elif action == "rename":
+        elif action in ("rename", "ren"):
             return rename_file(path, name=name, new_name=params.get("new_name", ""))
 
-        elif action == "read":
+        elif action in ("read", "read_file", "cat", "view"):
             return read_file(path, name=name)
 
-        elif action == "write":
+        elif action in ("write", "write_file", "edit"):
             return write_file(
                 path, name=name,
                 content=params.get("content", ""),
                 append=params.get("append", False)
             )
 
-        elif action == "find":
+        elif action in ("find", "search", "find_files"):
             return find_files(
                 name=name or params.get("name", ""),
                 extension=params.get("extension", ""),
@@ -110,7 +110,7 @@ def file_controller(
                 max_results=min(int(params.get("max_results", 20)), 50),
             )
 
-        elif action == "open":
+        elif action in ("open", "open_file", "launch", "start"):
             if params.get("recent") or params.get("kind") == "screenshot":
                 return open_recent_screenshot(
                     search_path=params.get("search_path") or path or "desktop"
@@ -134,19 +134,19 @@ def file_controller(
                 search_path="home",
             )
 
-        elif action == "largest":
+        elif action in ("largest", "get_largest", "largest_files", "big_files"):
             return get_largest_files(
                 path=path,
                 count=int(params.get("count", 10)),
             )
 
-        elif action == "disk_usage":
+        elif action in ("disk_usage", "usage", "df"):
             return get_disk_usage(path)
 
-        elif action == "organize_desktop":
+        elif action in ("organize_desktop", "organize", "clean_desktop"):
             return organize_desktop()
 
-        elif action == "info":
+        elif action in ("info", "get_info", "stat", "file_info"):
             return get_file_info(path, name=name)
 
         else:

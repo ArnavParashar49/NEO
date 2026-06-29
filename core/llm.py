@@ -19,6 +19,8 @@ from typing import Any, Sequence
 
 import litellm
 
+litellm.suppress_debug_info = True
+
 from core.models import DEFAULT_MODEL, FALLBACK_CHAIN
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,21 @@ logger = logging.getLogger(__name__)
 
 _COMETAPI_BASE = os.environ.get("COMETAPI_BASE_URL", "https://api.cometapi.com/v1")
 _NVIDIA_NIM_BASE = os.environ.get("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+
+# Maps nim/ model IDs → env var name for their dedicated API key
+_NIM_MODEL_KEY_MAP: dict[str, str] = {
+    "minimaxai/minimax-m3":              "NIM_MINIMAX_M3_KEY",
+    "nvidia/nemotron-3-ultra-550b-a55b": "NIM_NEMOTRON_ULTRA_KEY",
+    "stepfun-ai/step-3.7-flash":         "NIM_STEP37_FLASH_KEY",
+    "z-ai/glm-5.1":                      "NIM_GLM51_KEY",
+    "deepseek-ai/deepseek-v4-flash":     "NIM_DEEPSEEK_V4_FLASH_KEY",
+    "deepseek-ai/deepseek-v4-pro":       "NIM_DEEPSEEK_V4_PRO_KEY",
+    "google/gemma-4-31b-it":             "NIM_GEMMA4_31B_KEY",
+    "qwen/qwen3.5-122b-a10b":            "NIM_QWEN35_122B_KEY",
+    "minimaxai/minimax-m2.7":            "NIM_MINIMAX_M27_KEY",
+    # General NIM models fall back to the main key
+    "meta/llama-3.3-70b-instruct":       "NVIDIA_NIM_API_KEY",
+}
 
 
 def _pil_to_base64(img: Any) -> str:
@@ -99,6 +116,20 @@ def _route_provider(model: str) -> tuple[str, str | None, str | None]:
         routed = model.replace("cometapi/", "openai/", 1)
         key = get_api_key("cometapi_api_key", required=False) or None
         return routed, key, _COMETAPI_BASE
+
+    if model.startswith("nim/"):
+        # nim/ prefix: look up per-model dedicated key, fall back to main NIM key
+        actual_model = model[4:]  # strip 'nim/'
+        env_var = _NIM_MODEL_KEY_MAP.get(actual_model, "NVIDIA_NIM_API_KEY")
+        key = os.environ.get(env_var) or get_api_key("nvidia_nim_api_key", required=False) or None
+        return f"openai/{actual_model}", key, _NVIDIA_NIM_BASE
+
+    if model.startswith("nvidia/"):
+        # nvidia/ prefix routes via NVIDIA NIM (primary key or per-model key)
+        actual_model = model.replace("nvidia/", "", 1)
+        env_var = _NIM_MODEL_KEY_MAP.get(f"nvidia/{actual_model}", "NVIDIA_NIM_API_KEY")
+        key = os.environ.get(env_var) or get_api_key("nvidia_nim_api_key", required=False) or None
+        return f"openai/{actual_model}", key, _NVIDIA_NIM_BASE
 
     if model.startswith("deepseek/"):
         actual_model = model.replace("deepseek/", "", 1)
@@ -193,27 +224,56 @@ class ProviderRouter:
         chain = [primary_model]
         if primary_model.startswith("gemini/"):
             chain.extend([
-                "openrouter/google/gemini-2.5-flash",
+                "groq/llama-3.3-70b-versatile",
+                "nim/deepseek-ai/deepseek-v4-flash",   # fast, free
+                "nim/stepfun-ai/step-3.7-flash",       # fast, free
+                "nvidia/meta/llama-3.3-70b-instruct",  # reliable
+                "nim/qwen/qwen3.5-122b-a10b",          # large context
+                "nim/deepseek-ai/deepseek-v4-pro",     # strong reasoning
+                "nim/nvidia/nemotron-3-ultra-550b-a55b",# biggest
                 "cometapi/gpt-4o",
             ])
         elif primary_model.startswith("groq/"):
             chain.extend([
                 "gemini/gemini-2.5-flash-lite",
-                "openrouter/google/gemini-2.5-flash",
+                "nim/deepseek-ai/deepseek-v4-flash",
+                "nim/stepfun-ai/step-3.7-flash",
+                "nvidia/meta/llama-3.3-70b-instruct",
+                "nim/qwen/qwen3.5-122b-a10b",
+                "cometapi/gpt-4o",
+            ])
+        elif primary_model.startswith("nim/") or primary_model.startswith("nvidia/"):
+            chain.extend([
+                "groq/llama-3.3-70b-versatile",
+                "gemini/gemini-2.5-flash-lite",
+                "nim/deepseek-ai/deepseek-v4-flash",
+                "cometapi/gpt-4o",
             ])
         else:
             chain.extend([
                 "gemini/gemini-2.5-flash-lite",
-                "openrouter/google/gemini-2.5-flash",
+                "groq/llama-3.3-70b-versatile",
+                "nim/deepseek-ai/deepseek-v4-flash",
+                "nim/stepfun-ai/step-3.7-flash",
+                "nvidia/meta/llama-3.3-70b-instruct",
+                "nim/qwen/qwen3.5-122b-a10b",
+                "nim/deepseek-ai/deepseek-v4-pro",
+                "nim/nvidia/nemotron-3-ultra-550b-a55b",
                 "cometapi/gpt-4o",
             ])
         healthy = [m for m in chain if self._is_model_healthy(m)]
         return healthy if healthy else chain
 
     def _is_model_healthy(self, model: str) -> bool:
+        # nim/ prefix — each model has its own key so track per-model health
+        if model.startswith("nim/"):
+            model_id = model[4:]
+            health_key = f"nim_{model_id.replace('/', '_').replace('.', '_').replace('-', '_')}"
+            return self.is_healthy(health_key)
         for prefix, key in [
             ("gemini", "gemini"), ("groq", "groq"),
             ("cometapi", "cometapi"), ("gpt", "cometapi"),
+            ("nvidia", "nvidia_nim"),
             ("deepseek", "nvidia_nim"), ("kimi", "nvidia_nim_kimi"),
             ("openrouter", "openrouter"),
         ]:
@@ -280,6 +340,10 @@ def ask(
             router.record_success("gemini", latency)
         elif "groq" in model:
             router.record_success("groq", latency)
+        elif "nvidia" in model or "llama" in model or "mistral" in model:
+            router.record_success("nvidia_nim", latency)
+        elif "cometapi" in model or "openai" in model:
+            router.record_success("cometapi", latency)
     except Exception:
         pass
 
@@ -290,24 +354,38 @@ def ask_with_fallback(
     prompt: str | Sequence[Any],
     *,
     models: Sequence[str] | None = None,
+    task: str | None = None,
     **kwargs: Any,
 ) -> str:
-    """Try each model in order; uses dynamic ProviderRouter fallback chain."""
-    chain = list(models) if models else get_provider_router().get_fallback_chain(DEFAULT_MODEL)
+    """Try models in smart-pool order (best for task first).
+
+    If explicit *models* list is given, use that chain instead of the pool.
+    Pass task= hint ('fast','reasoning','coding','creative','vision') to
+    let the pool pick the most suitable model automatically.
+    """
+    if not models:
+        # Use SmartModelPool — picks best healthy model for the task
+        from core.model_pool import pool_ask
+        return pool_ask(prompt, task=task, **kwargs)
+
+    # Explicit chain provided — iterate in order (legacy / tool-specific path)
     last_err: Exception | None = None
-    for model in chain:
+    for model in models:
         try:
             return ask(prompt, model=model, **kwargs)
         except Exception as e:
             last_err = e
             logger.warning("%s failed: %s", model, e)
-            # Record failure for provider health tracking
             try:
                 router = get_provider_router()
                 if "gemini" in model:
                     router.record_failure("gemini")
                 elif "groq" in model:
                     router.record_failure("groq")
+                elif "nvidia" in model or "llama" in model or "mistral" in model:
+                    router.record_failure("nvidia_nim")
+                elif "cometapi" in model or "comet" in model:
+                    router.record_failure("cometapi")
             except Exception:
                 pass
     if last_err:

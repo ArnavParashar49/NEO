@@ -46,6 +46,20 @@ from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from wake_listener             import WakeListener
 from audio_processing          import NoiseGate
+from core.audio_pipeline import (
+    default_audio_devices as _audio_default_devices,
+    open_playback_stream as _audio_open_playback_stream,
+    pcm_to_bands as _audio_pcm_to_bands,
+    resample_pcm16 as _audio_resample_pcm16,
+    extract_live_audio as _extract_live_audio,
+)
+from core.session_manager import (
+    _clean_transcript as _session_clean_transcript,
+    _merge_transcript as _session_merge_transcript,
+)
+from core.tool_runner import (
+    tool_progress_eta as _shared_tool_progress_eta,
+)
 
 
 def get_base_dir():
@@ -136,107 +150,19 @@ def _is_ack_only(text: str) -> bool:
 
 
 def _pcm_to_bands(data: bytes, n_bands: int = VIS_BANDS) -> list[float]:
-    """Map PCM16 mono chunk to normalized frequency bands for the HUD visualizer."""
-    samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-    if samples.size == 0:
-        return [0.0] * n_bands
-
-    samples = samples / 32768.0
-    n_fft = 512
-    if samples.size < n_fft:
-        padded = np.zeros(n_fft, dtype=np.float32)
-        padded[: samples.size] = samples
-    else:
-        padded = samples[:n_fft]
-
-    window = np.hanning(n_fft).astype(np.float32)
-    spectrum = np.abs(np.fft.rfft(padded * window))
-    spec_len = max(1, len(spectrum) - 1)
-
-    bands: list[float] = []
-    for i in range(n_bands):
-        lo = int((i / n_bands) ** 1.4 * spec_len) + 1
-        hi = int(((i + 1) / n_bands) ** 1.4 * spec_len) + 1
-        hi = min(max(hi, lo + 1), len(spectrum))
-        val = float(np.mean(spectrum[lo:hi]))
-        bands.append(min(1.0, val / 4.0))
-    return bands
+    return _audio_pcm_to_bands(data, n_bands)
 
 
 def _resample_pcm16(data: bytes, from_rate: int, to_rate: int) -> bytes:
-    if from_rate == to_rate or not data:
-        return data
-    samples = np.frombuffer(data, dtype=np.int16)
-    if samples.size == 0:
-        return data
-    new_len = max(1, int(round(samples.size * to_rate / from_rate)))
-    x_old = np.arange(samples.size, dtype=np.float32)
-    x_new = np.linspace(0, samples.size - 1, new_len, dtype=np.float32)
-    out = np.interp(x_new, x_old, samples.astype(np.float32))
-    return out.astype(np.int16).tobytes()
-
-
-def _fallback_input_device() -> int | None:
-    """Pick first available input when Windows default device is -1."""
-    try:
-        for i, dev in enumerate(sd.query_devices()):
-            if int(dev.get("max_input_channels", 0)) > 0:
-                print(f"[NEO] Mic fallback device {i}: {dev.get('name', '?')}")
-                return i
-    except Exception:
-        pass
-    return None
+    return _audio_resample_pcm16(data, from_rate, to_rate)
 
 
 def _default_audio_devices() -> tuple[int | None, int | None]:
-    try:
-        inp, out = sd.default.device
-        in_dev = int(inp) if inp is not None and int(inp) >= 0 else _fallback_input_device()
-        out_dev = int(out) if out is not None and int(out) >= 0 else None
-        return in_dev, out_dev
-    except Exception:
-        return _fallback_input_device(), None
+    return _audio_default_devices()
 
 
 def _open_playback_stream() -> tuple[sd.RawOutputStream, int]:
-    """Open speaker stream; fall back to a supported sample rate on macOS."""
-    sd.stop()
-    time.sleep(0.15)
-    _, out_dev = _default_audio_devices()
-    rates = [RECEIVE_SAMPLE_RATE, 48000, 44100, 16000]
-    errors: list[str] = []
-
-    for rate in rates:
-        for dev in (out_dev, None):
-            try:
-                kwargs: dict = {
-                    "samplerate": rate,
-                    "channels": CHANNELS,
-                    "dtype": "int16",
-                    "blocksize": CHUNK_SIZE,
-                    "latency": "high",
-                }
-                if dev is not None:
-                    kwargs["device"] = dev
-                sd.check_output_settings(
-                    device=kwargs.get("device"),
-                    samplerate=rate,
-                    channels=CHANNELS,
-                    dtype="int16",
-                )
-                stream = sd.RawOutputStream(**kwargs)
-                stream.start()
-                if rate != RECEIVE_SAMPLE_RATE:
-                    print(f"[NEO] 🔊 Playback at {rate} Hz (resampled from {RECEIVE_SAMPLE_RATE})")
-                else:
-                    print(f"[NEO] 🔊 Playback at {rate} Hz")
-                return stream, rate
-            except Exception as e:
-                errors.append(f"{rate}Hz dev={dev}: {e}")
-
-    raise sd.PortAudioError(
-        "Could not open speaker. Tried: " + "; ".join(errors[:3])
-    )
+    return _audio_open_playback_stream()
 
 
 def _play_pcm_blocking(pcm: bytes, sample_rate: int = RECEIVE_SAMPLE_RATE, on_chunk=None):
@@ -500,7 +426,18 @@ def _live_voice_name() -> str:
 
 def _load_system_prompt() -> str:
     try:
-        return PROMPT_PATH.read_text(encoding="utf-8")
+        prompt = PROMPT_PATH.read_text(encoding="utf-8")
+        import platform, getpass, datetime
+        sys_ctx = f"\n\n[SYSTEM CONTEXT]\nOperating System: {platform.system()} {platform.release()}\nOS Account Name: {getpass.getuser()}\nCurrent Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        # Inject memory context if available
+        try:
+            from core.memory_graph import format_graph_for_prompt
+            sys_ctx += format_graph_for_prompt()
+        except Exception:
+            pass
+            
+        return prompt + sys_ctx
     except Exception:
         return (
             "You are NEO, personal AI assistant. "
@@ -508,34 +445,25 @@ def _load_system_prompt() -> str:
             "Never simulate or guess results — always call the appropriate tool."
         )
 
-_CTRL_RE = re.compile(r"<ctrl\d+>", re.IGNORECASE)
-
-def _clean_transcript(text: str) -> str:    
-    text = _CTRL_RE.sub("", text)
-    text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
-    return text.strip()
+def _clean_transcript(text: str) -> str:
+    return _session_clean_transcript(text)
 
 
 def _merge_transcript(parts: list[str], new: str) -> list[str]:
-    """Merge streaming transcription chunks (delta or cumulative)."""
-    new = new.strip()
-    if not new:
-        return parts
-    joined = " ".join(parts).strip()
-    if not joined:
-        return [new]
-    if new == joined or new in joined:
-        return parts
-    if new.startswith(joined) or len(new) > len(joined) + 2:
-        return [new]
-    return parts + [new]
+    return _session_merge_transcript(parts, new)
+
+
+def _join_transcript(parts: list[str]) -> str:
+    """Join streamed text chunks without gluing adjacent words together."""
+    return " ".join(part.strip() for part in parts if part and part.strip()).strip()
 
 from hybrid.bootstrap import init_hybrid_system
 
 _HYBRID_ORCHESTRATOR = init_hybrid_system()
 _SLOW_TOOLS = _HYBRID_ORCHESTRATOR.registry.slow_tools()
 # Auto-generated from registry — no hand-maintained declarations file needed
-CORE_TOOL_DECLARATIONS = _HYBRID_ORCHESTRATOR.registry.to_gemini_declarations()
+# Exclude MCP tools for the Live session to avoid 1007/1008 limit errors
+CORE_TOOL_DECLARATIONS = _HYBRID_ORCHESTRATOR.registry.to_gemini_declarations(include_mcp_tools=False)
 
 
 class MicPhase(Enum):
@@ -558,6 +486,8 @@ class NeoLive:
         self._speaking_lock = threading.Lock()
         self._phase_lock    = threading.Lock()
         self.ui.on_text_command = self._on_text_command
+        self.ui.on_stop_command = self._on_stop_command
+        self.ui.on_force_listen = self._force_listen
         self._turn_done_event: asyncio.Event | None = None
         self._smart_mode    = _smart_mode_enabled()
         self._mic_phase     = MicPhase.STANDBY if self._smart_mode else MicPhase.USER_SPEAKING
@@ -576,6 +506,7 @@ class NeoLive:
         self._last_search_result    = ""
         self._last_system_command   = ""
         self._system_handled_turn   = False
+        self._display_command_turn = False
         self._local_system_lock     = threading.Lock()
         self._neo_streaming        = False
         self._turn_finalize_pending = False
@@ -668,6 +599,41 @@ class NeoLive:
         self._orb_hide_at = 0.0
         self.ui.siri_cancel_hide()
 
+    def _set_ui_state(self, state: str):
+        self._ui_state = state
+        self.ui.apply_ui_state(state)
+        self.ui.set_running_state(state in ("THINKING", "SPEAKING"))
+
+    def _on_stop_command(self):
+        """Forcefully stops the current agent loop, audio, and background tasks."""
+        print("[NEO] Stop requested by user.")
+        
+        # Stop speaking
+        self.player.stop()
+        self.set_speaking(False)
+        
+        # In a Live API session, we can restart it to clear the context stream
+        if self._loop and self.session:
+            asyncio.run_coroutine_threadsafe(
+                self._force_restart_live_session(),
+                self._loop
+            )
+            
+        self.ui.siri_cancel_hide()
+        self._set_ui_state("STANDBY")
+
+    async def _force_restart_live_session(self):
+        """Cleanly drops and recreates the Gemini Live connection."""
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception:
+                pass
+        self._reset_live_session_state()
+        self.session = None
+
+
+
     def _go_standby(self):
         """Return to wake-word standby and hide the open mic."""
         self._clear_orb_hide_deadline()
@@ -696,6 +662,7 @@ class NeoLive:
         self._neo_streaming = False
         self._turn_finalize_pending = False
         self._ack_spoken_this_turn = False
+        self._display_command_turn = False
         self._wake_listen_blocked_until = 0.0
         with self._speaking_lock:
             self._is_speaking = False
@@ -860,6 +827,7 @@ class NeoLive:
             self._set_phase(MicPhase.USER_SPEAKING)
             self._reset_orb_hide_deadline()
             self._flush_wake_prebuffer()
+            self._start_daily_news_check()
             return
 
         print(f"[NEO] Wake ({source})")
@@ -877,6 +845,15 @@ class NeoLive:
         self.ui.set_state("LISTENING")
         self._reset_orb_hide_deadline()
         self._flush_wake_prebuffer()
+        self._start_daily_news_check()
+
+    def _start_daily_news_check(self) -> None:
+        def run() -> None:
+            from core.proactive_assistant import run_daily_news_briefing
+
+            run_daily_news_briefing(self.ui)
+
+        threading.Thread(target=run, daemon=True, name="NEO-daily-briefing").start()
 
     def _force_listen(self):
         """Recover mic when user taps the button while NEO is processing."""
@@ -906,14 +883,7 @@ class NeoLive:
         self.ui.write_log(f"You: {text}")
 
     def _tool_progress_eta(self, name: str) -> int:
-        return {
-            "web_search": 18,
-            "youtube_video": 12,
-            "flight_finder": 20,
-            "file_processor": 15,
-            "agent_task": 25,
-            "weather_report": 4,
-        }.get(name, 12)
+        return _shared_tool_progress_eta(name)
 
     def _start_processing_keepalive(self):
         self._processing_keepalive_stop.clear()
@@ -1306,7 +1276,7 @@ class NeoLive:
     def _finalize_turn_output(self, user_text: str = ""):
         """Finish log + follow-up after audio drained and late transcription settled."""
         with self._out_buf_lock:
-            full_out = " ".join(self._live_out_buf).strip()
+            full_out = _join_transcript(self._live_out_buf)
             full_in = user_text or " ".join(self._live_in_buf).strip()
             self._live_out_buf = []
             self._live_in_buf = []
@@ -1356,11 +1326,24 @@ class NeoLive:
                 self.ui.finish_neo_stream(full_out)
             self._processing = False
 
+        if self._display_command_turn and full_out and not system_handled:
+            self.ui.show_command_response(full_out)
+            self._speak_command_ready_notice()
+        self._display_command_turn = False
+
         self._handle_turn_complete(full_in, full_out)
 
         # ── Intelligence loop: observe, compact, suggest ──
         if full_in and full_out and not phantom and not system_handled:
             self._run_memory_intelligence(full_in, full_out)
+            try:
+                from core.proactive_assistant import analyze_turn
+
+                proactive = analyze_turn(full_in, full_out)
+                if proactive:
+                    self.ui.write_log(f"Neo: {proactive}")
+            except Exception as exc:
+                print(f"[Proactive] Suggestion skipped: {exc}")
             try:
                 from core.memory_suggestions import get_suggestion
 
@@ -1473,6 +1456,14 @@ class NeoLive:
         if finished and phase in (MicPhase.USER_SPEAKING, MicPhase.FOLLOWUP):
             min_words = 1 if phase == MicPhase.USER_SPEAKING else _MIN_USER_WORDS
             if len(text.split()) >= min_words:
+                if self._try_proactive_confirmation(text, notify_model=True):
+                    return
+                from core.response_presentation import is_command_request
+
+                self._display_command_turn = is_command_request(text)
+                if self._display_command_turn:
+                    self._suppress_live_audio_until = time.time() + 90.0
+                    self._drain_incoming_audio()
                 if self._try_consume_fast_path(text, "voice"):
                     return
                 if self._try_goal_dispatcher(text):
@@ -1485,18 +1476,29 @@ class NeoLive:
                     self._schedule_think_filler(text)
                 self._maybe_auto_show_images(text)
 
-    def _on_text_command(self, text: str):
+    def _on_text_command(self, text: str) -> bool:
         if not self._loop or not self.session:
-            return
+            return False
         text = text.strip()
         if not text:
-            return
+            return False
+        if self._try_proactive_confirmation(text, notify_model=True):
+            return True
+        from core.response_presentation import is_command_request
+
+        self._display_command_turn = is_command_request(text)
+        if self._display_command_turn:
+            self._suppress_live_audio_until = time.time() + 90.0
+            self._drain_incoming_audio()
+        # The UI's _send() already logged "You: ..." — prevent duplicate
+        self._user_line_logged = True
+        self._last_user_log = text
         if self._run_local_system_control(text):
-            return
+            return True
         if self._try_consume_fast_path(text, "typed"):
-            return
+            return True
         if self._try_goal_dispatcher(text):
-            return
+            return True
         if self._smart_mode and self._get_phase() == MicPhase.STANDBY:
             # Typed command — do not open the live mic or show "listening"
             self.ui.siri_wake()
@@ -1504,13 +1506,52 @@ class NeoLive:
         elif self._smart_mode:
             self._drain_out_queue()
             self.ui.set_mic_live(self._mic_live)
+        typed_turn = (
+            "[TYPED_CHAT_MESSAGE]\n"
+            "This is an intentional typed message, not a wake-word event. "
+            "Respond directly, including to greetings.\n"
+            + self._wrap_user_turn(text)
+        )
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
-                turns={"parts": [{"text": self._wrap_user_turn(text)}]},
+                turns={"parts": [{"text": typed_turn}]},
                 turn_complete=True
             ),
             self._loop
         )
+        return True
+
+    def _try_proactive_confirmation(self, text: str, *, notify_model: bool) -> bool:
+        from core.proactive_assistant import consume_reply
+
+        pending = consume_reply(text)
+        if pending is None:
+            return False
+        kind, parameters = pending
+        if not self._user_line_logged:
+            self._log_user_line(text)
+        if kind == "cancelled":
+            result = "Okay, I won't set it."
+        elif kind == "reminder":
+            from actions.reminder import reminder
+
+            result = reminder(parameters)
+        else:
+            return False
+        self.ui.write_log(f"Neo: {result}")
+        self._set_phase(MicPhase.AI_RESPONDING)
+        if notify_model and self._loop and self.session:
+            asyncio.run_coroutine_threadsafe(
+                self.session.send_client_content(
+                    turns={"parts": [{"text": (
+                        f"[SYSTEM_DONE] Proactive follow-up result: {result}\n"
+                        "Acknowledge in one short sentence. Do not call tools."
+                    )}]},
+                    turn_complete=True,
+                ),
+                self._loop,
+            )
+        return True
 
     def set_speaking(self, value: bool, *, block_wake_after: bool = True):
         with self._speaking_lock:
@@ -1535,6 +1576,23 @@ class NeoLive:
             ),
             self._loop
         )
+
+    def _speak_command_ready_notice(self) -> None:
+        """Speak a short notice without reading terminal syntax aloud."""
+        if not self._try_begin_offline_speech():
+            return
+
+        def play() -> None:
+            try:
+                pcm = _synthesize_charon_speech(
+                    _get_api_key(), "I've put the command on screen."
+                )
+                if pcm:
+                    _play_pcm_blocking(pcm, on_chunk=self.ui.push_audio_levels)
+            finally:
+                self._end_offline_speech()
+
+        threading.Thread(target=play, daemon=True, name="NEO-command-notice").start()
 
     def notify_user(self, text: str, interrupt: bool = False):
         """Used by orchestrator and background tasks to push updates to the UI chat log."""
@@ -1768,6 +1826,29 @@ class NeoLive:
         if not isinstance(result, ToolResult):
             return
         text = result.text or "Done."
+        marker = "INSTALL_CONFIRMATION_JSON:"
+        if marker in text:
+            try:
+                card = json.loads(text.split(marker, 1)[1].splitlines()[0])
+                self.ui.show_install_confirmation(
+                    str(card["title"]), str(card["source"]), str(card["command"])
+                )
+                result.text = (
+                    f"A verified {card['source']} install is ready and the confirmation "
+                    f"card is visible. Ask exactly: Install {card['title']}?"
+                )
+                text = result.text
+            except (KeyError, TypeError, ValueError):
+                pass
+        if text.startswith("CANCELLED_COMMAND:"):
+            match = re.search(r"```(?:shell|bash|powershell)?\s*\n(.*?)\n```", text, re.S)
+            if match:
+                self.ui.show_command_response(f"```shell\n{match.group(1).strip()}\n```")
+            result.text = (
+                "The terminal command was not run and is already visible on screen. "
+                "Reply exactly: I've put the command on screen."
+            )
+            text = result.text
         if show_progress:
             self._finish_processing()
         self._speak_tool_result_hints(text)
@@ -1901,35 +1982,49 @@ class NeoLive:
             while True:
                 async for response in self.session.receive():
 
-                    if response.data:
+                    audio_data = _extract_live_audio(response)
+                    if audio_data:
                         if time.time() < self._suppress_live_audio_until:
                             continue
                         if self._turn_done_event and self._turn_done_event.is_set():
                             self._turn_done_event.clear()
-                        self.audio_in_queue.put_nowait(response.data)
+                        self.audio_in_queue.put_nowait(audio_data)
 
                     if response.server_content:
                         sc = response.server_content
 
                         phase = self._get_phase()
 
+                        output_transcription = getattr(sc, "output_transcription", None)
                         if (
-                            sc.output_transcription
-                            and sc.output_transcription.text
-                            and phase not in (MicPhase.WAKE_SPEAKING,)
+                            output_transcription
+                            and output_transcription.text
+                            and phase != MicPhase.WAKE_SPEAKING
                         ):
-                            txt = _clean_transcript(sc.output_transcription.text)
+                            txt = _clean_transcript(output_transcription.text)
                             if txt:
                                 with self._out_buf_lock:
                                     self._live_out_buf = _merge_transcript(
                                         self._live_out_buf, txt
                                     )
-                                    live = " ".join(self._live_out_buf).strip()
+                                    live = _join_transcript(self._live_out_buf)
                                 if live and not (
                                     _is_ack_only(live) and self._ack_spoken_this_turn
                                 ):
                                     self.ui.stream_neo(live)
                                     self._neo_streaming = True
+                        elif sc.model_turn and sc.model_turn.parts:
+                            if phase != MicPhase.WAKE_SPEAKING:
+                                for p in sc.model_turn.parts:
+                                    if hasattr(p, "text") and p.text:
+                                        with self._out_buf_lock:
+                                            self._live_out_buf.append(p.text)
+                                        live = _join_transcript(self._live_out_buf)
+                                        if live and not (
+                                            _is_ack_only(live) and self._ack_spoken_this_turn
+                                        ):
+                                            self.ui.stream_neo(live)
+                                            self._neo_streaming = True
 
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
@@ -1948,6 +2043,14 @@ class NeoLive:
                             # Do NOT finalize log here — wait for audio + late text
 
                     if response.tool_call:
+                        # Text emitted before a tool call is provisional planning,
+                        # not the answer. Remove it so only the post-tool result is
+                        # shown in either chat surface.
+                        with self._out_buf_lock:
+                            self._live_out_buf = []
+                        self._neo_streaming = False
+                        self._turn_finalize_pending = False
+                        self.ui.cancel_neo_stream()
                         asyncio.create_task(
                             self._handle_tool_calls(response.tool_call),
                             name=f"NEO-tool-{response.tool_call.function_calls[0].name if response.tool_call.function_calls else 'batch'}",
@@ -1958,9 +2061,9 @@ class NeoLive:
             err = str(e).lower()
             if any(
                 tok in err
-                for tok in ("1006", "1008", "keepalive", "closed", "abnormal closure")
+                for tok in ("1006", "1008", "1011", "internal error", "keepalive", "closed", "abnormal closure")
             ):
-                print(f"[NEO] Live session dropped — reconnecting.")
+                print(f"[NEO] Live session dropped ({err[:20]}) — reconnecting.")
             else:
                 print(f"[NEO] ❌ Recv: {e}")
                 traceback.print_exc()
