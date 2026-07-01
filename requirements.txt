@@ -3,15 +3,12 @@ numpy
 google-genai
 pillow
 requests
-beautifulsoup4
-duckduckgo-search
 ddgs
 playwright
 
 python-dotenv
 psutil
 comtypes
-pycaw
 send2trash
 youtube-transcript-api
 # Optional for download_control (YouTube/music/video): pip install yt-dlp
@@ -21,8 +18,6 @@ PySide6
 litellm
 platformdirs
 keyring
-docker
-certifi
 vosk
 pypdf
 chromadb
@@ -32,7 +27,6 @@ exa-py==2.14.0
 
 # Added by NEO
 pdfplumber
-pypdf2
 python-docx
 markdown-it-py>=3.0,<5
 pydub

@@ -196,10 +196,7 @@ def _extract_urls(text: str) -> list[str]:
 
 def _ddg_search(query: str, max_results: int = 8) -> list[dict]:
     try:
-        try:
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError:
         return []
 

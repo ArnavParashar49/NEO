@@ -946,7 +946,7 @@ class SpotlightAssistantOverlay(QWidget):
                 color: #e9e9ec;
                 background: transparent;
                 font-family: "Segoe UI";
-                font-size: 11px;
+                font-size: 12px;
             }}
             QScrollBar:vertical {{ background: transparent; width: 5px; }}
             QScrollBar::handle:vertical {{

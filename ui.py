@@ -72,9 +72,55 @@ _INTERNAL_RESPONSE_HEADINGS = (
     "sequencing my approach",
     "analyzing user input",
     "analysis of user request",
+    "analyzing mathematical expressions",
+    "evaluating mathematical expressions",
     "confirming download absence",
     "reasoning",
 )
+_INTERNAL_HEADING_RE = re.compile(
+    r"^(?:processing|analy[sz]ing|analysis|evaluating|reviewing|considering|"
+    r"formulating|crafting|drafting|planning|sequencing|checking|verifying|"
+    r"confirming|assessing|interpreting|examining|determining|calculating|"
+    r"thinking|reasoning)\b",
+    re.I,
+)
+_META_REASONING_MARKERS = (
+    "i need to ",
+    "i should ",
+    "i must ",
+    "i will now ",
+    "i'll now ",
+    "i am going to ",
+    "the user asks",
+    "the user wants",
+    "the user's request",
+    "the user's message",
+    "i've just finished",
+    "i have analyzed",
+    "i've analyzed",
+    "my response",
+    "system context",
+    "tool call",
+    "internal instruction",
+    "chain of thought",
+)
+
+
+def _response_heading(text: str) -> str:
+    return (text or "").strip().lstrip("*#_ `").splitlines()[0].strip("*#_ `:.-")
+
+
+def _has_internal_heading(text: str) -> bool:
+    head = _response_heading(text)
+    raw = (text or "").lower()
+    known = any(
+        heading.startswith(head.lower()) or head.lower().startswith(heading)
+        for heading in _INTERNAL_RESPONSE_HEADINGS
+        if len(head) >= 3
+    )
+    return known or bool(_INTERNAL_HEADING_RE.match(head)) and any(
+        marker in raw for marker in _META_REASONING_MARKERS
+    )
 
 
 def _is_internal_model_text(text: str) -> bool:
@@ -82,11 +128,7 @@ def _is_internal_model_text(text: str) -> bool:
     raw = (text or "").strip().lower()
     if not raw:
         return False
-    head = raw.lstrip("*#_ `").splitlines()[0].strip("*#_ `:.-")
-    if len(head) >= 3 and any(
-        heading.startswith(head) or head.startswith(heading)
-        for heading in _INTERNAL_RESPONSE_HEADINGS
-    ):
+    if _has_internal_heading(text):
         return True
     strong_markers = (
         "i've analyzed the user's message",
@@ -98,7 +140,40 @@ def _is_internal_model_text(text: str) -> bool:
         "i've streamlined the response",
         "the status check is answered concisely",
     )
-    return sum(marker in raw for marker in strong_markers) >= 2
+    return (
+        sum(marker in raw for marker in strong_markers) >= 2
+        or sum(marker in raw for marker in _META_REASONING_MARKERS) >= 2
+    )
+
+
+def _normalize_user_facing_model_text(text: str) -> str:
+    """Convert known reasoning leaks into the concise answer they contain."""
+    value = (text or "").strip()
+    raw = value.lower()
+    if not value:
+        return ""
+    if (
+        "mathematical expressions" in raw
+        and ("resulted in" in raw or "yielded" in raw)
+    ):
+        first = re.search(r"resulted in\s+(-?\d+(?:\.\d+)?)", raw)
+        second = re.search(r"yielded\s+(-?\d+(?:\.\d+)?)", raw)
+        if first and second:
+            left, right = first.group(1), second.group(1)
+            relation = "equal" if left == right else "not equal"
+            return f"The results are {left} and {right}, so they are {relation}."
+    if _has_internal_heading(value):
+        lines = value.splitlines()
+        body = "\n".join(lines[1:]).strip()
+        sentences = re.split(r"(?<=[.!?])\s+", body)
+        user_facing = [
+            sentence.strip()
+            for sentence in sentences
+            if sentence.strip()
+            and not any(marker in sentence.lower() for marker in _META_REASONING_MARKERS)
+        ]
+        return " ".join(user_facing).strip()
+    return value
 
 
 class LogWidget(QTextEdit):
@@ -1559,7 +1634,8 @@ class NeoUI:
         """Finalize the live line with optional list formatting."""
         if not body or not body.strip():
             return
-        if _is_internal_model_text(body):
+        body = _normalize_user_facing_model_text(body)
+        if not body or _is_internal_model_text(body):
             self.cancel_neo_stream()
             return
         self.stop_log_progress()
@@ -1583,7 +1659,8 @@ class NeoUI:
         if tl.startswith("neo:"):
             self.stop_log_progress()
             body = text.split(":", 1)[1].strip()
-            if _is_internal_model_text(body):
+            body = _normalize_user_facing_model_text(body)
+            if not body or _is_internal_model_text(body):
                 self.cancel_neo_stream()
                 return
             if self._win._log._neo_stream_active:

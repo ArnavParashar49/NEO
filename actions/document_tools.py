@@ -85,18 +85,7 @@ def _merge_pdfs(params: dict) -> str:
             writer.write(f)
         writer.close()
     except ImportError:
-        try:
-            from PyPDF2 import PdfMerger
-
-            merger = PdfMerger()
-            for pdf in pdfs:
-                merger.append(str(pdf))
-            merger.write(str(output))
-            merger.close()
-        except ImportError:
-            return "FAILED: Install pypdf — pip install pypdf"
-        except Exception as e:
-            return f"FAILED: Could not merge PDFs — {e}"
+        return "FAILED: Install pypdf — pip install pypdf"
     except Exception as e:
         return f"FAILED: Could not merge PDFs — {e}"
 

@@ -1,6 +1,7 @@
 import config  # noqa: F401 — load .env before other modules
 
 import asyncio
+import datetime
 import random
 import re
 import socket
@@ -269,6 +270,20 @@ def _filler_from_user_text(text: str) -> str:
     return random.choice(_LIGHT_FILLERS)
 
 
+def _session_greeting(now: datetime.datetime | None = None) -> str:
+    current = now or datetime.datetime.now()
+    if current.hour < 12:
+        period = "morning"
+    elif current.hour < 17:
+        period = "afternoon"
+    else:
+        period = "evening"
+    return (
+        f"Good {period}. I'm doing well—what are we working on today? "
+        "Want me to check for any genuinely important updates too?"
+    )
+
+
 def _tool_filler_phrase(name: str, args: dict) -> str:
     """Short spoken line while a slow tool runs."""
     if name == "web_search":
@@ -495,6 +510,7 @@ class NeoLive:
         self._followup_deadline    = 0.0
         self._listen_deadline      = 0.0
         self._had_conversation     = False
+        self._session_greeted      = False
         self._last_user_log        = ""
         self._user_line_logged     = False
         self._ack_spoken_this_turn = False
@@ -827,7 +843,6 @@ class NeoLive:
             self._set_phase(MicPhase.USER_SPEAKING)
             self._reset_orb_hide_deadline()
             self._flush_wake_prebuffer()
-            self._start_daily_news_check()
             return
 
         print(f"[NEO] Wake ({source})")
@@ -839,21 +854,52 @@ class NeoLive:
         self._user_line_logged = False
         self._user_spoke_this_turn = False
         self._fast_path_turn_used = False
+        if not self._session_greeted:
+            self._start_session_greeting()
+            return
         self._set_phase(MicPhase.USER_SPEAKING)
-        self.ui.set_standby(False)
-        self.ui.siri_set_prompt("I'm listening…")
-        self.ui.set_state("LISTENING")
         self._reset_orb_hide_deadline()
         self._flush_wake_prebuffer()
-        self._start_daily_news_check()
 
-    def _start_daily_news_check(self) -> None:
+    def _start_daily_news_check(self, *, force: bool = False) -> None:
         def run() -> None:
             from core.proactive_assistant import run_daily_news_briefing
 
-            run_daily_news_briefing(self.ui)
+            run_daily_news_briefing(self.ui, force=force)
 
         threading.Thread(target=run, daemon=True, name="NEO-daily-briefing").start()
+
+    def _start_session_greeting(self) -> None:
+        from core.proactive_assistant import stage_news_offer
+
+        self._session_greeted = True
+        greeting = _session_greeting()
+        stage_news_offer()
+        self._set_phase(MicPhase.WAKE_SPEAKING)
+        self.ui.write_log(f"Neo: {greeting}")
+
+        def play() -> None:
+            began = self._try_begin_offline_speech()
+            try:
+                if began:
+                    self.ui.set_speaking_active(True)
+                    pcm = _synthesize_charon_greeting(_get_api_key(), greeting)
+                    if pcm:
+                        _play_pcm_blocking(pcm, on_chunk=self.ui.push_audio_levels)
+            finally:
+                if began:
+                    self._end_offline_speech()
+                    self.ui.set_speaking_active(False)
+                if self._loop:
+                    self._loop.call_soon_threadsafe(self._finish_session_greeting)
+                else:
+                    self._finish_session_greeting()
+
+        threading.Thread(target=play, daemon=True, name="NEO-session-greeting").start()
+
+    def _finish_session_greeting(self) -> None:
+        if self._get_phase() == MicPhase.WAKE_SPEAKING:
+            self._begin_followup(open_mic_immediately=True)
 
     def _force_listen(self):
         """Recover mic when user taps the button while NEO is processing."""
@@ -1536,6 +1582,9 @@ class NeoLive:
             from actions.reminder import reminder
 
             result = reminder(parameters)
+        elif kind == "news":
+            self._start_daily_news_check(force=True)
+            result = "I'll check and only show you something if it genuinely needs attention."
         else:
             return False
         self.ui.write_log(f"Neo: {result}")

@@ -87,6 +87,15 @@ def consume_reply(text: str) -> tuple[str, dict] | None:
         return action.kind, dict(action.parameters)
 
 
+def stage_news_offer() -> str:
+    """Offer a briefing without fetching or displaying anything first."""
+    global _pending
+    question = "Want me to check for any genuinely important updates too?"
+    with _pending_lock:
+        _pending = PendingAction(kind="news", question=question, parameters={})
+    return question
+
+
 def _load_state() -> dict:
     try:
         return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
@@ -99,26 +108,30 @@ def _save_state(state: dict) -> None:
     _STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def run_daily_news_briefing(ui) -> None:
-    """Run at most once daily and surface only genuinely important updates."""
+def run_daily_news_briefing(ui, *, force: bool = False) -> None:
+    """Fetch an explicitly approved briefing, at most once daily unless forced."""
     global _news_inflight
     today = date.today().isoformat()
     with _news_lock:
-        if _news_inflight or _load_state().get("last_news_date") == today:
+        if _news_inflight or (not force and _load_state().get("last_news_date") == today):
             return
         _news_inflight = True
     try:
         from actions.web_search import _gemini_search_with_retry
 
         result = _gemini_search_with_retry(
-            "Find at most 3 genuinely important developments from the last 24 hours "
-            "that materially affect technology, AI, cybersecurity, India, or global safety. "
-            "Exclude routine product launches, rumors, sports, and celebrity news. "
-            "If nothing is important, reply exactly NO_IMPORTANT_NEWS. Be concise and include sources.",
+            "Return at most 2 urgent developments from the last 24 hours only if they require "
+            "attention or have major immediate consequences for AI safety, cybersecurity, India, "
+            "or global safety. Ordinary news, company milestones, product releases, funding, "
+            "politics-as-usual, research announcements, and forecasts are NOT important. "
+            "If nothing clears that threshold, reply exactly NO_IMPORTANT_NEWS. "
+            "Use one concise sentence per item and include a source URL.",
             attempts=2,
         ).strip()
         if result and result != "NO_IMPORTANT_NEWS":
-            ui.show_command_response(f"### Important update\n\n{result}")
+            ui.write_log(f"Neo: Important update: {result}")
+        elif result == "NO_IMPORTANT_NEWS":
+            ui.write_log("Neo: Nothing genuinely important needs your attention right now.")
         state = _load_state()
         state["last_news_date"] = today
         _save_state(state)

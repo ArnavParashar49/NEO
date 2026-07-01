@@ -36,3 +36,10 @@ def test_work_with_tomorrow_gets_reminder_offer():
     assert proactive.analyze_turn(
         "My work submission is tomorrow", "Understood."
     ) == "Want me to remind you tomorrow at 9:00 AM?"
+
+
+def test_news_is_only_staged_until_user_approves():
+    question = proactive.stage_news_offer()
+
+    assert question == "Want me to check for any genuinely important updates too?"
+    assert proactive.consume_reply("yes") == ("news", {})

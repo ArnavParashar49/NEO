@@ -5,7 +5,7 @@ Uses Open-Meteo for Weather, Wikipedia REST API for facts, and DuckDuckGo for fa
 
 import requests
 from urllib.parse import quote_plus
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 def get_weather(location: str) -> str:
     """Fetch weather using Open-Meteo."""

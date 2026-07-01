@@ -98,7 +98,7 @@ class CodeBlock(QFrame):
         root.addLayout(header)
 
         body = QLabel(code.rstrip())
-        body.setFont(_mono(10))
+        body.setFont(_mono(11))
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         body.setStyleSheet(
@@ -135,7 +135,7 @@ class CommandBlock(QFrame):
         root.addLayout(header)
 
         body = QLabel(command.rstrip())
-        body.setFont(_mono(10))
+        body.setFont(_mono(11))
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         body.setStyleSheet(

@@ -72,7 +72,7 @@ class _UserBubble(QFrame):
         self.setObjectName("userBubble")
         lab = QLabel(text)
         lab.setWordWrap(True)
-        lab.setFont(_font(11))
+        lab.setFont(_font(12))
         lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         lab.setStyleSheet(f"color: {C.WHITE}; background: transparent; border: none;")
         lay = QVBoxLayout(self)
@@ -115,7 +115,7 @@ class _AiMessage(QWidget):
         if streaming:
             lab = QLabel(text)
             lab.setWordWrap(True)
-            lab.setFont(_font(11))
+            lab.setFont(_font(12))
             lab.setTextFormat(Qt.TextFormat.MarkdownText)
             lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             lab.setStyleSheet(
@@ -150,7 +150,7 @@ class _AiMessage(QWidget):
             combined = "\n\n".join(prose_chunks)
             lab = QLabel()
             lab.setWordWrap(True)
-            lab.setFont(_font(11))
+            lab.setFont(_font(12))
             lab.setTextFormat(Qt.TextFormat.MarkdownText)
             lab.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse

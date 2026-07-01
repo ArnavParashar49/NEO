@@ -21,12 +21,8 @@ def _get_api_key() -> str:
 
 
 def _ddgs_class():
-    try:
-        from ddgs import DDGS
-        return DDGS
-    except ImportError:
-        from duckduckgo_search import DDGS
-        return DDGS
+    from ddgs import DDGS
+    return DDGS
 
 
 def _gemini_search(query: str) -> str:

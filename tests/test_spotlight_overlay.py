@@ -270,7 +270,7 @@ def test_install_confirmation_uses_dedicated_card():
 
 
 def test_internal_model_analysis_is_detected_before_rendering():
-    from ui import _is_internal_model_text
+    from ui import _is_internal_model_text, _normalize_user_facing_model_text
 
     leaked = (
         "**Processing User Input**\n\n"
@@ -284,6 +284,30 @@ def test_internal_model_analysis_is_detected_before_rendering():
         "I've hit a roadblock. My search for a direct download link came up empty."
     )
     assert not _is_internal_model_text("Hello, how may I assist you?")
+    leaked_math = (
+        "Analyzing Mathematical Expressions\n\n"
+        "I've just finished evaluating the two mathematical expressions provided. "
+        "Expression one resulted in 53.5, while the second yielded 25.5. "
+        "The claim that the expressions are equal is therefore false."
+    )
+    assert _is_internal_model_text(leaked_math)
+    assert _normalize_user_facing_model_text(leaked_math) == (
+        "The results are 53.5 and 25.5, so they are not equal."
+    )
+    generic_leak = (
+        "Formulating Concise Response\n\n"
+        "I need to answer the user's request directly. The capital of France is Paris."
+    )
+    assert _is_internal_model_text(generic_leak)
+    assert _normalize_user_facing_model_text(generic_leak) == (
+        "The capital of France is Paris."
+    )
+    assert _normalize_user_facing_model_text(
+        "Reviewing the request\n\nI need to inspect the tool call before I answer."
+    ) == ""
+    assert not _is_internal_model_text(
+        "Planning a trip\n\nStart by choosing dates, then compare flights."
+    )
 
 
 def test_gfm_rendering_and_max_height_scroll_cap():
